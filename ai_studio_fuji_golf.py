@@ -23,6 +23,7 @@ HOLE_COLOR = (10, 10, 10)
 RED = (200, 0, 0)
 YELLOW = (255, 255, 0)
 GRAY = (60, 60, 60)
+BROWN = (101, 67, 33)
 
 # --- Club Data ---
 CLUBS = [
@@ -44,6 +45,13 @@ class Ball:
         self.max_height = 0
         self.wind_x, self.wind_y = 0, 0
         
+        self.rpm = 0
+        self.loft_offset = 0.0
+        self.dist = 0
+        self.height = 0
+        self.angle = 0
+        self.bounce_count = 0
+        
         self.prev_x, self.prev_y = 0, 0
         self.lie = 100
         # Putting state
@@ -54,38 +62,88 @@ class Ball:
         self.ds = None # Drag start
         self.is_dragging = False
 
-    def start_flight(self, dist, height, angle, wx, wy, power_mult):
+    def start_flight(self, dist, height, angle, wx, wy, power_mult, loft_offset, club_idx):
         self.prev_x, self.prev_y = self.x, self.y
         self.is_moving = True
         self.flight_progress = 0
+        self.bounce_count = 0
+        self.loft_offset = loft_offset
+        self.rpm = max(500, int((2000 + (club_idx * 300) + (loft_offset * 150)) * power_mult))
+        
         rad = math.radians(angle)
         actual_dist = (dist * power_mult) * random.uniform(0.98, 1.02)
-        self.vy = (actual_dist / self.flight_duration) * math.cos(rad)
-        self.vx = (actual_dist / self.flight_duration) * math.sin(rad)
-        self.max_height = height * power_mult
+        
+        self.dist = actual_dist
+        self.height = height * power_mult
+        self.angle = angle
+        self.flight_duration = 100
+        
+        self.vy = (self.dist / self.flight_duration) * math.cos(rad)
+        self.vx = (self.dist / self.flight_duration) * math.sin(rad)
+        self.max_height = self.height
         self.wind_x, self.wind_y = wx / 70.0, wy / 70.0
         self.strokes += 1
+
+    def start_bounce(self):
+        self.bounce_count += 1
+        self.flight_progress = 0
+        
+        # High RPM reduces forward bounce or causes backspin!
+        dist_damp = 0.5 - ((self.rpm - 2000) / 8500.0) 
+        dist_damp = max(-0.3, min(0.6, dist_damp))
+        
+        height_damp = 0.25 + (self.loft_offset / 100.0)
+        height_damp = max(0.1, min(0.4, height_damp))
+        
+        self.dist *= dist_damp
+        self.height *= height_damp
+        self.flight_duration = max(5, int(self.flight_duration * 0.6))
+        self.rpm = int(self.rpm * 0.5) # Spin decays after hitting the ground
+        
+        if self.flight_duration <= 5 or self.height < 0.5:
+            self.is_moving = False
+            self.z = 0
+        else:
+            rad = math.radians(self.angle)
+            self.vy = (self.dist / self.flight_duration) * math.cos(rad)
+            self.vx = (self.dist / self.flight_duration) * math.sin(rad)
+            self.max_height = self.height
+            self.wind_x *= 0.5
+            self.wind_y *= 0.5
 
     def update(self):
         if self.is_moving:
             self.flight_progress += 1
-            self.x += self.vx + self.wind_x
-            self.y += self.vy + self.wind_y
             t = self.flight_progress / self.flight_duration
             self.z = 4 * self.max_height * t * (1 - t)
+            
+            # Wind affects the ball more at higher altitudes
+            altitude_wind_mult = self.z / 40.0
+            self.x += self.vx + (self.wind_x * altitude_wind_mult)
+            self.y += self.vy + (self.wind_y * altitude_wind_mult)
+            
             if self.flight_progress >= self.flight_duration:
-                self.is_moving = False; self.z = 0
+                self.z = 0
+                self.start_bounce()
 
-def project(obj_x, obj_y, obj_z, cam_x, cam_y, w, h):
+def project(obj_x, obj_y, obj_z, cam_x, cam_y, cam_angle, w, h):
+    rel_x = obj_x - cam_x
     rel_y = obj_y - cam_y
-    if rel_y < 1: return None
-    factor = (h * 0.5) / (rel_y + 15)
-    sx = (w // 2) + ((obj_x - cam_x) * factor)
+    
+    # Rotate around the camera so the view aligns with our aim
+    rad = math.radians(cam_angle)
+    rx = rel_x * math.cos(rad) - rel_y * math.sin(rad)
+    ry = rel_x * math.sin(rad) + rel_y * math.cos(rad)
+    
+    if ry < -10: 
+        ry = -10  # Clamp to a near plane so ground polys stretch off the bottom of the screen!
+    factor = (h * 0.5) / (ry + 15)
+    sx = (w // 2) + (rx * factor)
     horizon = h * 0.38
-    sy = horizon + (h - horizon) * (15 / (rel_y + 15)) - (obj_z * factor)
+    sy = horizon + (h - horizon) * (15 / (ry + 15)) - (obj_z * factor)
     return int(sx), int(sy), factor
 
-def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset):
+def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, cam_angle, show_wind_preview):
     # --- Club Inventory (Left Side) ---
     pygame.draw.rect(screen, (0,0,0,100), (10, 10, 180, 330))
     for i, c in enumerate(CLUBS):
@@ -101,14 +159,23 @@ def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is
     loft_str = f"+{int(trajectory_offset)}" if trajectory_offset > 0 else str(int(trajectory_offset))
     screen.blit(font_med.render(f"LOFT: {loft_str}°", True, WHITE), (curr_w - 280, 140))
     
+    display_rpm = ball.rpm if ball.is_moving else max(500, int(2000 + (club_idx * 300) + (trajectory_offset * 150)))
+    screen.blit(font_med.render(f"SPIN: {display_rpm} RPM", True, WHITE), (curr_w - 280, 180))
+    
     # Wind Compass
     cx, cy = curr_w - 80, 150
     pygame.draw.circle(screen, WHITE, (cx, cy), 40, 2)
     mag = math.hypot(wx, wy)
     if mag > 0:
-        ex, ey = cx + (wx/mag)*35, cy - (wy/mag)*35
+        rad = math.radians(cam_angle)
+        local_wx = wx * math.cos(rad) - wy * math.sin(rad)
+        local_wy = wx * math.sin(rad) + wy * math.cos(rad)
+        ex, ey = cx + (local_wx/mag)*35, cy - (local_wy/mag)*35
         pygame.draw.line(screen, YELLOW, (cx, cy), (ex, ey), 3)
     screen.blit(font_small.render(f"WIND: {int(mag)} MPH", True, WHITE), (cx - 55, cy + 50))
+    
+    preview_color = YELLOW if show_wind_preview else GRAY
+    screen.blit(font_small.render(f"WIND PREVIEW: {'ON' if show_wind_preview else 'OFF'} (P)", True, preview_color), (cx - 95, cy + 75))
 
     # --- Power Meter (Bottom Center) ---
     if is_swinging or power > 0:
@@ -162,15 +229,19 @@ def main():
     ball = Ball()
     wx, wy = random.uniform(-difficulty, difficulty), random.uniform(-difficulty, difficulty)
     cam_x, cam_y = 0, -20
+    cam_angle = 0.0
     aim_angle = 0.0
     trajectory_offset = 0.0
+    show_wind_preview = False
     club_idx = 0
     state = "3D"
     hole_pos = (0, 400)
-    fairway_nodes = [(yrd, math.sin(yrd*0.02)*12, 35) for yrd in range(0, 401, 20)]
+    fairway_nodes = [(yrd, math.sin(yrd*0.02)*12, 35) for yrd in range(40, 401, 20)]
     
     is_swinging = False
     power = 0.0
+    msg_text = ""
+    msg_timer = 0
 
     running = True
     while running:
@@ -187,6 +258,7 @@ def main():
                 if not ball.is_moving and state == "3D":
                     if event.key == pygame.K_w: club_idx = (club_idx - 1) % len(CLUBS)
                     if event.key == pygame.K_s: club_idx = (club_idx + 1) % len(CLUBS)
+                    if event.key == pygame.K_p: show_wind_preview = not show_wind_preview
                     if event.key == pygame.K_SPACE:
                         is_swinging = True; power = 0.0
 
@@ -195,7 +267,7 @@ def main():
                     effective_power = power * (ball.lie / 100.0)
                     dist = CLUBS[club_idx][1] - (trajectory_offset * 2.5)
                     height = CLUBS[club_idx][2] + (trajectory_offset * 1.5)
-                    ball.start_flight(dist, height, aim_angle, wx, wy, effective_power)
+                    ball.start_flight(dist, height, aim_angle, wx, wy, effective_power, trajectory_offset, club_idx)
                     is_swinging = False; power = 0.0
 
             # Putting Event Handling
@@ -223,13 +295,26 @@ def main():
 
         # --- Game Logic ---
         if state == "3D":
+            was_moving = ball.is_moving
             ball.update()
-            cam_x += (ball.x - cam_x) * 0.1
-            cam_y += ((ball.y - 18) - cam_y) * 0.1
-            if not ball.is_moving and math.hypot(ball.x - hole_pos[0], ball.y - hole_pos[1]) < 25:
-                state = "GREEN"
-                ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 20
-                ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 20
+            
+            cam_angle += (aim_angle - cam_angle) * 0.1
+            target_cam_x = ball.x - math.sin(math.radians(cam_angle)) * 18
+            target_cam_y = ball.y - math.cos(math.radians(cam_angle)) * 18
+            cam_x += (target_cam_x - cam_x) * 0.1
+            cam_y += (target_cam_y - cam_y) * 0.1
+            
+            if was_moving and not ball.is_moving:
+                rough_center_x = math.sin(ball.y * 0.02) * 12
+                if abs(ball.x - rough_center_x) > 80 or ball.y < -50 or ball.y > 450:
+                    ball.strokes += 2
+                    ball.x, ball.y = ball.prev_x, ball.prev_y
+                    msg_text = "OUT OF BOUNDS! +2 STROKES"
+                    msg_timer = 180
+                elif math.hypot(ball.x - hole_pos[0], ball.y - hole_pos[1]) < 25:
+                    state = "GREEN"
+                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 20
+                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 20
 
         elif state == "GREEN":
             ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
@@ -240,47 +325,132 @@ def main():
 
         # --- Rendering ---
         if state == "3D":
-            pygame.draw.rect(screen, ROUGH, (0, int(curr_h*0.38), curr_w, curr_h))
+            pygame.draw.rect(screen, BROWN, (0, int(curr_h*0.38), curr_w, curr_h))
+            
+            rough_nodes = [(yrd, math.sin(yrd*0.02)*12, 80) for yrd in range(-100, 501, 20)]
+            for i in range(len(rough_nodes)-1):
+                y1, x1, w1 = rough_nodes[i]; y2, x2, w2 = rough_nodes[i+1]
+                p1l = project(x1-w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p1r = project(x1+w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p2l = project(x2-w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p2r = project(x2+w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if p1l and p2l: pygame.draw.polygon(screen, ROUGH, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
+
+            # --- Tee Box ---
+            tb_p1l = project(-12, -10, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tb_p1r = project(12, -10, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tb_p2l = project(-12, 8, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tb_p2r = project(12, 8, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            if tb_p1l and tb_p1r and tb_p2l and tb_p2r:
+                pygame.draw.polygon(screen, GREEN_COLOR, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]])
+                pygame.draw.polygon(screen, WHITE, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]], 1)
+                tm1 = project(-4, 0, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                tm2 = project(4, 0, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if tm1: 
+                    pygame.draw.circle(screen, RED, tm1[:2], max(2, int(4*tm1[2])))
+                    pygame.draw.circle(screen, WHITE, tm1[:2], max(2, int(4*tm1[2])), 1)
+                if tm2: 
+                    pygame.draw.circle(screen, RED, tm2[:2], max(2, int(4*tm2[2])))
+                    pygame.draw.circle(screen, WHITE, tm2[:2], max(2, int(4*tm2[2])), 1)
+
             for i in range(len(fairway_nodes)-1):
                 y1, x1, w1 = fairway_nodes[i]; y2, x2, w2 = fairway_nodes[i+1]
-                p1l = project(x1-w1, y1, 0, cam_x, cam_y, curr_w, curr_h)
-                p1r = project(x1+w1, y1, 0, cam_x, cam_y, curr_w, curr_h)
-                p2l = project(x2-w2, y2, 0, cam_x, cam_y, curr_w, curr_h)
-                p2r = project(x2+w2, y2, 0, cam_x, cam_y, curr_w, curr_h)
+                p1l = project(x1-w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p1r = project(x1+w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p2l = project(x2-w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p2r = project(x2+w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 if p1l and p2l: pygame.draw.polygon(screen, FAIRWAY, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
 
-            # Draw Green circle
-            green_pts = []
-            for a in range(0, 360, 30):
-                gp = project(hole_pos[0]+math.cos(math.radians(a))*30, hole_pos[1]+math.sin(math.radians(a))*30, 0, cam_x, cam_y, curr_w, curr_h)
-                if gp: green_pts.append(gp[:2])
-            if len(green_pts) > 3: pygame.draw.polygon(screen, GREEN_COLOR, green_pts)
+            # Draw Green shape (matches 2D view)
+            green1_pts = []
+            green2_pts = []
+            for a in range(0, 360, 10):
+                rad = math.radians(a)
+                gp1 = project(hole_pos[0] + math.cos(rad)*10, hole_pos[1] + math.sin(rad)*15, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if gp1: green1_pts.append(gp1[:2])
+                gp2 = project(hole_pos[0] + math.cos(rad)*17.5, hole_pos[1] + math.sin(rad)*7.5, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if gp2: green2_pts.append(gp2[:2])
+            if len(green1_pts) > 2: pygame.draw.polygon(screen, GREEN_COLOR, green1_pts)
+            if len(green2_pts) > 2: pygame.draw.polygon(screen, GREEN_COLOR, green2_pts)
 
-            f = project(hole_pos[0], hole_pos[1], 0, cam_x, cam_y, curr_w, curr_h)
+            f = project(hole_pos[0], hole_pos[1], 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
             if f:
                 pygame.draw.line(screen, WHITE, (f[0], f[1]), (f[0], f[1]-int(90*f[2])), 2)
                 pygame.draw.rect(screen, RED, (f[0], f[1]-int(90*f[2]), int(20*f[2]), int(15*f[2])))
             
-            b = project(ball.x, ball.y, ball.z, cam_x, cam_y, curr_w, curr_h)
-            if b: pygame.draw.circle(screen, WHITE, (b[0], b[1]), max(2, int(10*b[2])))
+            # --- Draw Player ---
+            if not ball.is_moving:
+                p_angle = math.radians(aim_angle - 90)
+                px = ball.x + 2.5 * math.sin(p_angle)
+                py = ball.y + 2.5 * math.cos(p_angle)
+                
+                feet_l = project(px - 1.0*math.cos(p_angle), py + 1.0*math.sin(p_angle), 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                feet_r = project(px + 1.0*math.cos(p_angle), py - 1.0*math.sin(p_angle), 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                waist = project(px, py, 2.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                neck = project(px, py, 4.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                head = project(px, py, 5.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                
+                if head and waist and feet_l and feet_r and neck:
+                    PLAYER_COLOR = (200, 220, 255)
+                    pygame.draw.line(screen, (50, 50, 50), waist[:2], feet_l[:2], 2)
+                    pygame.draw.line(screen, (50, 50, 50), waist[:2], feet_r[:2], 2)
+                    pygame.draw.line(screen, PLAYER_COLOR, waist[:2], neck[:2], 4)
+                    pygame.draw.circle(screen, (255, 200, 150), head[:2], max(2, int(1.0 * head[2])))
+                    
+                    if is_swinging:
+                        swing_rot = math.radians(aim_angle + 160 * power)
+                        club_x = px + 3.5 * math.sin(swing_rot)
+                        club_y = py + 3.5 * math.cos(swing_rot)
+                        club_z = 6 * power
+                        hands_x = px + 1.5 * math.sin(swing_rot)
+                        hands_y = py + 1.5 * math.cos(swing_rot)
+                        hands_z = 2.5 + 2 * power
+                    else:
+                        club_x, club_y, club_z = ball.x, ball.y, 0
+                        aim_rad = math.radians(aim_angle)
+                        hands_x = px + 1.5 * math.sin(aim_rad)
+                        hands_y = py + 1.5 * math.cos(aim_rad)
+                        hands_z = 2.0
+
+                    hands = project(hands_x, hands_y, hands_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    club_head = project(club_x, club_y, club_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    
+                    if hands and club_head:
+                        pygame.draw.line(screen, PLAYER_COLOR, neck[:2], hands[:2], 2)
+                        pygame.draw.line(screen, (150, 150, 150), hands[:2], club_head[:2], 2)
+                        pygame.draw.circle(screen, (100, 100, 100), club_head[:2], max(2, int(1.5 * club_head[2])))
+
+            b = project(ball.x, ball.y, ball.z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            if b: pygame.draw.circle(screen, WHITE, (b[0], b[1]), max(1, int(0.15*b[2])))
 
             # --- Aim Indicator ---
             if not ball.is_moving:
                 adj_dist = CLUBS[club_idx][1] - (trajectory_offset * 2.5)
                 adj_height = CLUBS[club_idx][2] + (trajectory_offset * 1.5)
-                target_x = ball.x + adj_dist * math.sin(math.radians(aim_angle))
-                target_y = ball.y + adj_dist * math.cos(math.radians(aim_angle))
-                t_proj = project(target_x, target_y, 0, cam_x, cam_y, curr_w, curr_h)
+                base_target_x = ball.x + adj_dist * math.sin(math.radians(aim_angle))
+                base_target_y = ball.y + adj_dist * math.cos(math.radians(aim_angle))
                 
                 arc_points = []
-                for step in range(16):
-                    t = step / 15.0
-                    px = ball.x + (target_x - ball.x) * t
-                    py = ball.y + (target_y - ball.y) * t
+                sim_x, sim_y = ball.x, ball.y
+                sim_vx = (base_target_x - ball.x) / 100.0
+                sim_vy = (base_target_y - ball.y) / 100.0
+                sim_wx = (wx / 70.0) if show_wind_preview else 0.0
+                sim_wy = (wy / 70.0) if show_wind_preview else 0.0
+                
+                for step in range(101):
+                    t = step / 100.0
                     pz = 4 * adj_height * t * (1 - t)
-                    proj_pt = project(px, py, pz, cam_x, cam_y, curr_w, curr_h)
-                    if proj_pt:
-                        arc_points.append(proj_pt[:2])
+                    
+                    alt_wind_mult = pz / 40.0
+                    sim_x += sim_vx + (sim_wx * alt_wind_mult)
+                    sim_y += sim_vy + (sim_wy * alt_wind_mult)
+                    
+                    if step % 6 == 0 or step == 100:
+                        proj_pt = project(sim_x, sim_y, pz, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        if proj_pt:
+                            arc_points.append(proj_pt[:2])
+                            
+                t_proj = project(sim_x, sim_y, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
                         
                 if len(arc_points) > 1:
                     pygame.draw.lines(screen, YELLOW, False, arc_points, 1)
@@ -288,12 +458,12 @@ def main():
                 if b and t_proj:
                     pygame.draw.circle(screen, YELLOW, (t_proj[0], t_proj[1]), max(2, int(15*t_proj[2])), 1)
 
-            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset)
+            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, cam_angle, show_wind_preview)
 
         elif state == "GREEN":
             screen.fill(ROUGH)
             pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 - 200, curr_h//2 - 300, 400, 600))
-            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 - 350, curr_h//2 - 100, 700, 300))
+            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 - 350, curr_h//2 - 150, 700, 300))
             
             hole_screen_pos = (curr_w//2, curr_h//2)
             pygame.draw.circle(screen, HOLE_COLOR, hole_screen_pos, 20)
@@ -328,6 +498,14 @@ def main():
             
             msg_restart = font_med.render("Press 'R' to Restart", True, WHITE)
             screen.blit(msg_restart, (curr_w//2 - msg_restart.get_width()//2, curr_h//2 + 80))
+
+        if msg_timer > 0:
+            msg_timer -= 1
+            surf = font_large.render(msg_text, True, RED)
+            bg_rect = surf.get_rect(center=(curr_w//2, curr_h//2 - 100)).inflate(20, 20)
+            pygame.draw.rect(screen, WHITE, bg_rect, border_radius=8)
+            pygame.draw.rect(screen, HOLE_COLOR, bg_rect, 3, border_radius=8)
+            screen.blit(surf, surf.get_rect(center=(curr_w//2, curr_h//2 - 100)))
 
         pygame.display.flip()
         clock.tick(60)
