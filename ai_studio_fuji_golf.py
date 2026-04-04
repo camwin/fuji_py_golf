@@ -85,7 +85,7 @@ def project(obj_x, obj_y, obj_z, cam_x, cam_y, w, h):
     sy = horizon + (h - horizon) * (15 / (rel_y + 15)) - (obj_z * factor)
     return int(sx), int(sy), factor
 
-def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging):
+def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset):
     # --- Club Inventory (Left Side) ---
     pygame.draw.rect(screen, (0,0,0,100), (10, 10, 180, 330))
     for i, c in enumerate(CLUBS):
@@ -98,6 +98,8 @@ def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is
     screen.blit(font_med.render(f"{dist} YDS TO PIN", True, WHITE), (curr_w - 280, 20))
     screen.blit(font_med.render(f"STROKES: {ball.strokes}", True, WHITE), (curr_w - 280, 60))
     screen.blit(font_med.render(f"LIE: {ball.lie}%", True, WHITE if ball.lie >= 90 else YELLOW), (curr_w - 280, 100))
+    loft_str = f"+{int(trajectory_offset)}" if trajectory_offset > 0 else str(int(trajectory_offset))
+    screen.blit(font_med.render(f"LOFT: {loft_str}°", True, WHITE), (curr_w - 280, 140))
     
     # Wind Compass
     cx, cy = curr_w - 80, 150
@@ -161,6 +163,7 @@ def main():
     wx, wy = random.uniform(-difficulty, difficulty), random.uniform(-difficulty, difficulty)
     cam_x, cam_y = 0, -20
     aim_angle = 0.0
+    trajectory_offset = 0.0
     club_idx = 0
     state = "3D"
     hole_pos = (0, 400)
@@ -190,7 +193,9 @@ def main():
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_SPACE and is_swinging:
                     effective_power = power * (ball.lie / 100.0)
-                    ball.start_flight(CLUBS[club_idx][1], CLUBS[club_idx][2], aim_angle, wx, wy, effective_power)
+                    dist = CLUBS[club_idx][1] - (trajectory_offset * 2.5)
+                    height = CLUBS[club_idx][2] + (trajectory_offset * 1.5)
+                    ball.start_flight(dist, height, aim_angle, wx, wy, effective_power)
                     is_swinging = False; power = 0.0
 
             # Putting Event Handling
@@ -212,6 +217,9 @@ def main():
         if not ball.is_moving and not is_swinging and state == "3D":
             if keys[pygame.K_LEFT]: aim_angle -= 0.8
             if keys[pygame.K_RIGHT]: aim_angle += 0.8
+            if keys[pygame.K_UP]: trajectory_offset += 0.5
+            if keys[pygame.K_DOWN]: trajectory_offset -= 0.5
+            trajectory_offset = max(-15.0, min(15.0, trajectory_offset))
 
         # --- Game Logic ---
         if state == "3D":
@@ -258,14 +266,29 @@ def main():
 
             # --- Aim Indicator ---
             if not ball.is_moving:
-                target_x = ball.x + CLUBS[club_idx][1] * math.sin(math.radians(aim_angle))
-                target_y = ball.y + CLUBS[club_idx][1] * math.cos(math.radians(aim_angle))
+                adj_dist = CLUBS[club_idx][1] - (trajectory_offset * 2.5)
+                adj_height = CLUBS[club_idx][2] + (trajectory_offset * 1.5)
+                target_x = ball.x + adj_dist * math.sin(math.radians(aim_angle))
+                target_y = ball.y + adj_dist * math.cos(math.radians(aim_angle))
                 t_proj = project(target_x, target_y, 0, cam_x, cam_y, curr_w, curr_h)
+                
+                arc_points = []
+                for step in range(16):
+                    t = step / 15.0
+                    px = ball.x + (target_x - ball.x) * t
+                    py = ball.y + (target_y - ball.y) * t
+                    pz = 4 * adj_height * t * (1 - t)
+                    proj_pt = project(px, py, pz, cam_x, cam_y, curr_w, curr_h)
+                    if proj_pt:
+                        arc_points.append(proj_pt[:2])
+                        
+                if len(arc_points) > 1:
+                    pygame.draw.lines(screen, YELLOW, False, arc_points, 1)
+
                 if b and t_proj:
-                    pygame.draw.line(screen, YELLOW, (b[0], b[1]), (t_proj[0], t_proj[1]), 1)
                     pygame.draw.circle(screen, YELLOW, (t_proj[0], t_proj[1]), max(2, int(15*t_proj[2])), 1)
 
-            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging)
+            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset)
 
         elif state == "GREEN":
             screen.fill(ROUGH)
