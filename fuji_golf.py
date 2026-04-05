@@ -40,19 +40,22 @@ def generate_course():
     course.append({
         "par": 4, "hole_pos": (0, 400), 
         "fairway": [(y, math.sin(y*0.02)*12, 35) for y in range(40, 401, 20)],
-        "green": ((45, 60), (70, 30), (10, -5))
+        "green": ((16, 22), (20, 14), (5, -5)),
+        "slope_waves": [(0.008, 0.15, 0.15, 1.5, 0.5), (0.005, 0.25, 0.25, 0.5, 1.5)]
     })
     # Hole 2: Par 3, 180y (Short, angled slightly right)
     course.append({
         "par": 3, "hole_pos": (20, 180), 
         "fairway": [(y, y*0.1, 25) for y in range(20, 181, 20)],
-        "green": ((35, 50), (55, 25), (-5, 10))
+        "green": ((14, 18), (20, 12), (-5, 5)),
+        "slope_waves": [(0.009, 0.12, 0.16, 2.5, 1.0), (0.006, 0.22, 0.28, 1.0, 2.0)]
     })
     # Hole 3: Par 5, 550y (Dogleg left)
     course.append({
         "par": 5, "hole_pos": (-80, 550), 
         "fairway": [(y, -math.pow(y/100, 2)*2.5, 35) for y in range(40, 551, 20)],
-        "green": ((45, 45), (65, 35), (0, 0))
+        "green": ((18, 18), (22, 14), (0, 0)),
+        "slope_waves": [(0.008, 0.1, 0.15, 0, 3), (0.006, 0.2, 0.25, 1.5, 0)]
     })
     # Generate remaining 15 holes to make a full 18
     pars = [4, 4, 3, 4, 5, 4, 4, 3, 4, 5, 4, 4, 3, 5, 4]
@@ -62,17 +65,28 @@ def generate_course():
         else: dist = random.randint(500, 600)
         curve_dir = 12 if i % 2 == 0 else -12
         
-        gw1, gh1 = random.uniform(40, 70), random.uniform(50, 90)
-        gw2, gh2 = random.uniform(60, 100), random.uniform(25, 50)
-        ox, oy = random.uniform(-25, 25), random.uniform(-25, 25)
+        gw1, gh1 = random.uniform(12, 20), random.uniform(15, 25)
+        gw2, gh2 = random.uniform(15, 25), random.uniform(12, 20)
+        ox, oy = random.uniform(-10, 10), random.uniform(-10, 10)
         course.append({
             "par": p, "hole_pos": (math.sin(dist*0.01)*curve_dir, dist), 
             "fairway": [(y, math.sin(y*0.01)*curve_dir, 30) for y in range(40, dist+1, 20)],
-            "green": ((gw1, gh1), (gw2, gh2), (ox, oy))
+            "green": ((gw1, gh1), (gw2, gh2), (ox, oy)),
+            "slope_waves": [
+                (random.uniform(0.005, 0.010), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
+                (random.uniform(0.002, 0.006), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
+            ]
         })
     return course
 
 COURSE = generate_course()
+
+def get_slope(x, y, waves):
+    sx, sy = 0.0, 0.0
+    for amp, fx, fy, px, py in waves:
+        sx += math.cos(x * fx + px) * amp
+        sy += math.sin(y * fy + py) * amp
+    return sx, sy
 
 def is_on_green(bx, by, hole_pos, green_shape):
     g1_w, g1_h = green_shape[0]
@@ -329,8 +343,8 @@ def main():
     difficulty = None
     options = [
         {"text": "1. Beginner (No Wind)", "diff": 0, "rect": pygame.Rect(0, 0, 0, 0)},
-        {"text": "2. Amateur (Light Wind)", "diff": 8, "rect": pygame.Rect(0, 0, 0, 0)},
-        {"text": "3. Pro (Heavy Wind)", "diff": 18, "rect": pygame.Rect(0, 0, 0, 0)}
+        {"text": "2. Amateur (Light Wind)", "diff": 15, "rect": pygame.Rect(0, 0, 0, 0)},
+        {"text": "3. Pro (Heavy Wind)", "diff": 30, "rect": pygame.Rect(0, 0, 0, 0)}
     ]
 
     while difficulty is None:
@@ -371,6 +385,7 @@ def main():
     fairway_nodes = hole_data["fairway"]
     par = hole_data["par"]
     green_shape = hole_data["green"]
+    slope_waves = hole_data["slope_waves"]
 
     ball = Ball()
     wx, wy = random.uniform(-difficulty, difficulty), random.uniform(-difficulty, difficulty)
@@ -473,6 +488,7 @@ def main():
                     fairway_nodes = hole_data["fairway"]
                     par = hole_data["par"]
                     green_shape = hole_data["green"]
+                    slope_waves = hole_data["slope_waves"]
                     ball = Ball()
                     wx, wy = random.uniform(-difficulty, difficulty), random.uniform(-difficulty, difficulty)
                     cam_x, cam_y = 0, -20
@@ -490,7 +506,15 @@ def main():
             if keys[pygame.K_RIGHT]: aim_angle += 0.8
             if keys[pygame.K_UP]: trajectory_offset += 0.5
             if keys[pygame.K_DOWN]: trajectory_offset -= 0.5
-            trajectory_offset = max(-15.0, min(15.0, trajectory_offset))
+            
+            club_name = CLUBS[club_idx][0]
+            if club_name == "LW": min_offset = -30.0
+            elif club_name == "SW": min_offset = -28.0
+            elif club_name == "GW": min_offset = -24.0
+            elif club_name == "PW": min_offset = -21.5
+            else: min_offset = -15.0
+            
+            trajectory_offset = max(min_offset, min(15.0, trajectory_offset))
 
         # --- Game Logic ---
         if state == "3D":
@@ -519,10 +543,10 @@ def main():
                     ball.x, ball.y = ball.prev_x, ball.prev_y
                     msg_text = "OUT OF BOUNDS! +2 STROKES"
                     msg_timer = 180
-                elif math.hypot(ball.x - hole_pos[0], ball.y - hole_pos[1]) < 75:
+                elif math.hypot(ball.x - hole_pos[0], ball.y - hole_pos[1]) < 35 or is_on_green(ball.x, ball.y, hole_pos, green_shape):
                     state = "GREEN"
-                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 10
-                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 10
+                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 28.0
+                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 28.0
                     if is_on_green(ball.x, ball.y, hole_pos, green_shape):
                         ball.lie = 100
                         ball.chipping = False
@@ -542,7 +566,7 @@ def main():
                 ball.putt_x += ball.putt_vx
                 ball.putt_y += ball.putt_vy
                 ball.putt_z += ball.putt_vz
-                ball.putt_vz -= 0.8 # Gravity
+                ball.putt_vz -= 2.3 # Gravity
                 
                 if ball.putt_z <= 0:
                     ball.putt_z = 0
@@ -552,22 +576,28 @@ def main():
             else:
                 ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
                 
-                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 10.0
-                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 10.0
+                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
+                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
                 
                 if is_on_green(sim_x, sim_y, hole_pos, green_shape):
+                    sx, sy = get_slope(sim_x, sim_y, slope_waves)
+                    ball.putt_vx += sx * 2.8
+                    ball.putt_vy += sy * 2.8
                     ball.putt_vx *= 0.97
                     ball.putt_vy *= 0.97
+                    if math.hypot(ball.putt_vx, ball.putt_vy) < 0.7 and math.hypot(sx, sy) < 0.02:
+                        ball.putt_vx *= 0.5  # Strong static friction to prevent endless rolling
+                        ball.putt_vy *= 0.5
                 else:
-                    ball.putt_vx *= 0.85
-                    ball.putt_vy *= 0.85
+                    ball.putt_vx *= 0.7 # Fringe/Rough friction
+                    ball.putt_vy *= 0.7
             
-            is_moving_2d = abs(ball.putt_vx) >= 0.05 or abs(ball.putt_vy) >= 0.05 or ball.putt_z > 0
+            is_moving_2d = abs(ball.putt_vx) >= 0.06 or abs(ball.putt_vy) >= 0.06 or ball.putt_z > 0
             
             if not is_moving_2d and was_moving_2d:
                 ball.putt_vx = ball.putt_vy = ball.putt_z = 0
-                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 10.0
-                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 10.0
+                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
+                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
                 if is_on_green(sim_x, sim_y, hole_pos, green_shape):
                     ball.lie = 100
                     ball.chipping = False
@@ -583,16 +613,20 @@ def main():
                 dist_to_hole = math.hypot(ball.putt_x - hole_cx, ball.putt_y - hole_cy)
                 speed = math.hypot(ball.putt_vx, ball.putt_vy)
                 
-                if 0 < dist_to_hole < 26:
-                    pull_strength = (26 - dist_to_hole) * 0.12
+                if 0 < dist_to_hole < 24:
+                    # Gentle pull only when right on the lip
+                    pull_strength = (24 - dist_to_hole) * 0.08
                     ball.putt_vx += ((hole_cx - ball.putt_x) / dist_to_hole) * pull_strength
                     ball.putt_vy += ((hole_cy - ball.putt_y) / dist_to_hole) * pull_strength
                     
-                    drop_threshold = max(4.0, 20.0 - (speed * 3.0))
-                    if dist_to_hole < drop_threshold:
+                    if dist_to_hole < 12 and speed < 14.0:
                         state = "HOLE"
                         scores[hole_idx] = ball.strokes
                         show_scorecard = True
+                    elif dist_to_hole < 17 and speed >= 14.0:
+                        # Lip out penalty - lose speed from hitting the edge
+                        ball.putt_vx *= 0.85
+                        ball.putt_vy *= 0.85
 
         # --- Rendering ---
         if state == "3D":
@@ -744,11 +778,24 @@ def main():
             g1_w, g1_h = green_shape[0]
             g2_w, g2_h = green_shape[1]
             ox, oy = green_shape[2]
-            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 - int(g1_w*10), curr_h//2 - int(g1_h*10), int(g1_w*20), int(g1_h*20)))
-            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 + int(ox*10) - int(g2_w*10), curr_h//2 - int(oy*10) - int(g2_h*10), int(g2_w*20), int(g2_h*20)))
+            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 - int(g1_w*28), curr_h//2 - int(g1_h*28), int(g1_w*56), int(g1_h*56)))
+            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 + int(ox*28) - int(g2_w*28), curr_h//2 - int(oy*28) - int(g2_h*28), int(g2_w*56), int(g2_h*56)))
             
+            # Draw slope grid
+            for gy in range(curr_h//2 - 900, curr_h//2 + 900, 70):
+                for gx in range(curr_w//2 - 900, curr_w//2 + 900, 70):
+                    sim_x = hole_pos[0] + (gx - curr_w//2) / 28.0
+                    sim_y = hole_pos[1] - (gy - curr_h//2) / 28.0
+                    if is_on_green(sim_x, sim_y, hole_pos, green_shape):
+                        sx, sy = get_slope(sim_x, sim_y, slope_waves)
+                        draw_sx = sx * 4500
+                        draw_sy = sy * 4500
+                        if abs(draw_sx) > 1 or abs(draw_sy) > 1:
+                            pygame.draw.line(screen, (35, 140, 35), (gx, gy), (gx + draw_sx, gy + draw_sy), 2)
+                            pygame.draw.circle(screen, (200, 255, 200), (int(gx + draw_sx), int(gy + draw_sy)), 2)
+
             hole_screen_pos = (curr_w//2, curr_h//2)
-            pygame.draw.circle(screen, HOLE_COLOR, hole_screen_pos, 12)
+            pygame.draw.circle(screen, HOLE_COLOR, hole_screen_pos, 16)
             
             # --- FIXED: Putter Line ---
             if ball.is_dragging:
@@ -756,8 +803,8 @@ def main():
                 pygame.draw.line(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), mouse_pos, 2)
 
             if ball.putt_z > 0:
-                pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), 6) # shadow
-            pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), 6)
+                pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), 7) # shadow
+            pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), 7)
             
             mode_str = "CHIP" if ball.chipping else "PUTT"
             lie_str = f"Lie: {ball.lie}%"
