@@ -320,6 +320,7 @@ class Ball:
         self.is_dragging = False
         self.curve_accel_x = 0.0
         self.curve_accel_y = 0.0
+        self.hit_tree = False
 
     def start_flight(self, dist, height, angle, wx, wy, power_mult, loft_offset, club_idx, face_angle):
         self.prev_x, self.prev_y = self.x, self.y
@@ -327,6 +328,7 @@ class Ball:
         self.flight_progress = 0
         self.bounce_count = 0
         self.loft_offset = loft_offset
+        self.hit_tree = False
         
         d_loft, l_angle, s_loft, self.rpm = calculate_trackman_stats(club_idx, loft_offset, power_mult)
         self.dynamic_loft = d_loft
@@ -366,6 +368,7 @@ class Ball:
     def start_bounce(self):
         self.bounce_count += 1
         self.flight_progress = 0
+        self.hit_tree = False
         
         # High RPM reduces forward bounce or causes backspin
         # Adjusted to be more realistic (max ~4% backspin instead of 15%)
@@ -695,6 +698,8 @@ def main():
     green_shape = hole_data["green"]
     slope_waves = hole_data["slope_waves"]
     green_z = hole_data["green_z"]
+    bunkers = hole_data["bunkers"]
+    trees = hole_data["trees"]
 
     ball = Ball()
     wind_rng = random.Random(312 + hole_idx)
@@ -715,6 +720,7 @@ def main():
     msg_text = ""
     msg_timer = 0
     active_menu = None
+    particles = []
     
     current_tee_order = [network.player_id]
     peer_hole_scores = {}
@@ -795,8 +801,15 @@ def main():
                 if handled_menu: continue
 
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE: running = False
+                # Disabled ESC / Q quit to prevent accidental closing
+                # if event.key == pygame.K_ESCAPE: running = False
+                if event.key == pygame.K_q: pass 
                 if event.key == pygame.K_c: show_scorecard = not show_scorecard
+                
+                if (not ball.is_moving and not is_swinging and state == "3D") or \
+                   (state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0 and not ball.is_dragging and ball.chipping):
+                    if event.key == pygame.K_a: face_angle -= 1.0
+                    if event.key == pygame.K_d: face_angle += 1.0
                 
                 if state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0:
                     if event.key == pygame.K_SPACE:
@@ -819,6 +832,17 @@ def main():
                     effective_power = power * (ball.lie / 100.0)
                     dist = CLUBS[club_idx][1] - (trajectory_offset * 2.5)
                     height = CLUBS[club_idx][2] + (trajectory_offset * 1.5)
+                    
+                    in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                    if in_bunker:
+                        for _ in range(40):
+                            particles.append({
+                                'x': ball.x + random.uniform(-0.2, 0.2), 'y': ball.y + random.uniform(-0.2, 0.2), 'z': 0,
+                                'vx': random.uniform(-0.8, 0.8), 'vy': random.uniform(-0.8, 0.8), 'vz': random.uniform(1.0, 3.0),
+                                'life': random.randint(20, 40),
+                                'color': random.choice([(210, 180, 140), (190, 160, 120), (220, 190, 150)])
+                            })
+                            
                     ball.start_flight(dist, height, aim_angle, wx, wy, effective_power, trajectory_offset, club_idx, face_angle)
                     is_swinging = False; power = 0.0
 
@@ -831,6 +855,19 @@ def main():
                     ball.prev_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
                     ball.prev_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
                     power_mult = ball.lie / 100.0
+                    
+                    sim_x = ball.prev_x
+                    sim_y = ball.prev_y
+                    in_bunker = any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
+                    if in_bunker and ball.chipping:
+                        for _ in range(30):
+                            particles.append({
+                                'x': sim_x + random.uniform(-0.2, 0.2), 'y': sim_y + random.uniform(-0.2, 0.2), 'z': 0,
+                                'vx': random.uniform(-0.5, 0.5), 'vy': random.uniform(-0.5, 0.5), 'vz': random.uniform(0.5, 2.0),
+                                'life': random.randint(15, 30),
+                                'color': random.choice([(210, 180, 140), (190, 160, 120), (220, 190, 150)])
+                            })
+                            
                     if ball.chipping:
                         club_pwr = CLUBS[club_idx][1] / 125.0
                         club_lft = CLUBS[club_idx][3] / 46.0
@@ -877,6 +914,8 @@ def main():
                         green_shape = hole_data["green"]
                         slope_waves = hole_data["slope_waves"]
                         green_z = hole_data["green_z"]
+                        bunkers = hole_data["bunkers"]
+                        trees = hole_data["trees"]
                         ball = Ball()
                         wind_rng = random.Random(312 + hole_idx)
                         wx, wy = wind_rng.uniform(-difficulty, difficulty), wind_rng.uniform(-difficulty, difficulty)
@@ -899,8 +938,6 @@ def main():
         if is_stat_3d or (is_stat_2d and ball.chipping):
             if keys[pygame.K_UP]: trajectory_offset += 0.5
             if keys[pygame.K_DOWN]: trajectory_offset -= 0.5
-            if keys[pygame.K_a]: face_angle -= 0.5
-            if keys[pygame.K_d]: face_angle += 0.5
             
             club_name = CLUBS[club_idx][0]
             if club_name == "LW": min_offset = -30.0
@@ -917,9 +954,35 @@ def main():
             if keys[pygame.K_RIGHT]: aim_angle += 0.8
 
         # --- Game Logic ---
+        for p in particles[:]:
+            p['x'] += p['vx']
+            p['y'] += p['vy']
+            p['z'] += p['vz']
+            p['vz'] -= 0.15 # Gravity
+            p['life'] -= 1
+            if p['life'] <= 0 or p['z'] < 0:
+                particles.remove(p)
+                
         if state == "3D":
             was_moving = ball.is_moving
             ball.update()
+            
+            if ball.is_moving and not ball.hit_tree:
+                for tx, ty, tz, th, tw in trees:
+                    if math.hypot(ball.x - tx, ball.y - ty) < tw * 0.8:
+                        if ball.z <= tz + th:
+                            ball.hit_tree = True
+                            ball.vx *= -0.2
+                            ball.vy *= -0.2
+                            ball.wind_x = 0
+                            ball.wind_y = 0
+                            ball.curve_accel_x = 0
+                            ball.curve_accel_y = 0
+                            if ball.flight_progress < ball.flight_duration / 2:
+                                ball.flight_progress = ball.flight_duration - ball.flight_progress
+                            msg_text = "TREE HIT!"
+                            msg_timer = 90
+                            break
             
             cam_angle += (aim_angle - cam_angle) * 0.1
             target_cam_x = ball.x - math.sin(math.radians(cam_angle)) * 18
@@ -951,13 +1014,21 @@ def main():
                         ball.lie = 100
                         ball.chipping = False
                     else:
-                        ball.lie = random.randint(20, 90)
-                        ball.chipping = True if ball.lie < 70 else False
+                        in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                        if in_bunker:
+                            ball.lie = random.randint(15, 85)
+                            ball.chipping = True
+                        else:
+                            ball.lie = random.randint(30, 90)
+                            ball.chipping = True if ball.lie < 70 else False
                 else:
-                    if abs(ball.x - closest_x) <= closest_w:
+                    in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                    if in_bunker:
+                        ball.lie = random.randint(15, 85)
+                    elif abs(ball.x - closest_x) <= closest_w:
                         ball.lie = 100
                     else:
-                        ball.lie = random.randint(20, 100)
+                        ball.lie = random.randint(30, 100)
 
         elif state == "GREEN":
             was_moving_2d = ball.putt_vx != 0 or ball.putt_vy != 0 or ball.putt_z > 0
@@ -990,8 +1061,12 @@ def main():
                         ball.putt_vx *= 0.5  # Strong static friction to prevent endless rolling
                         ball.putt_vy *= 0.5
                 else:
-                    ball.putt_vx *= 0.7 # Fringe/Rough friction
-                    ball.putt_vy *= 0.7
+                    in_bunker = any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
+                    if in_bunker:
+                        ball.putt_vx *= 0.45; ball.putt_vy *= 0.45
+                    else:
+                        ball.putt_vx *= 0.7 # Fringe/Rough friction
+                        ball.putt_vy *= 0.7
             
             is_moving_2d = abs(ball.putt_vx) >= 0.06 or abs(ball.putt_vy) >= 0.06 or ball.putt_z > 0
             
@@ -1017,7 +1092,11 @@ def main():
                             if math.hypot(ball.putt_vx, ball.putt_vy) < 0.7 and math.hypot(sx, sy) < 0.02:
                                 ball.putt_vx *= 0.5; ball.putt_vy *= 0.5
                         else:
-                            ball.putt_vx *= 0.7; ball.putt_vy *= 0.7
+                            in_bunker = any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
+                            if in_bunker:
+                                ball.putt_vx *= 0.45; ball.putt_vy *= 0.45
+                            else:
+                                ball.putt_vx *= 0.7; ball.putt_vy *= 0.7
                 state = "3D"
                 ball.is_moving = False
                 ball.x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
@@ -1035,7 +1114,13 @@ def main():
                     msg_timer = 180
                     ball.strokes += 2
                 else:
-                    ball.lie = 100 if abs(ball.x - closest_x) <= closest_w else random.randint(20, 100)
+                    in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                    if in_bunker:
+                        ball.lie = random.randint(15, 85)
+                    elif abs(ball.x - closest_x) <= closest_w:
+                        ball.lie = 100
+                    else:
+                        ball.lie = random.randint(30, 100)
                 ball.chipping = False
                 aim_angle = math.degrees(math.atan2(hole_pos[0] - ball.x, hole_pos[1] - ball.y))
                 cam_angle = aim_angle
@@ -1050,8 +1135,13 @@ def main():
                     ball.lie = 100
                     ball.chipping = False
                 else:
-                    ball.lie = random.randint(20, 90)
-                    ball.chipping = True if ball.lie < 70 else False
+                    in_bunker = any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
+                    if in_bunker:
+                        ball.lie = random.randint(15, 85)
+                        ball.chipping = True
+                    else:
+                        ball.lie = random.randint(30, 90)
+                        ball.chipping = True if ball.lie < 70 else False
             elif not is_moving_2d:
                 ball.putt_vx = ball.putt_vy = ball.putt_z = 0
                 
@@ -1156,6 +1246,17 @@ def main():
                     if p1l[3] > -14 or p2l[3] > -14 or p1r[3] > -14 or p2r[3] > -14:
                         pygame.draw.polygon(screen, FAIRWAY, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
 
+            # --- Draw Bunkers ---
+            for bx, by, br, bz in bunkers:
+                b_pts = []
+                for a in range(0, 360, 20):
+                    rad = math.radians(a)
+                    r_dist = br + math.sin(a * 2.5) * (br * 0.15)
+                    pt = project(bx + math.cos(rad)*r_dist, by + math.sin(rad)*r_dist, bz, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    if pt: b_pts.append(pt)
+                if len(b_pts) > 2 and any(pt[3] > -14 for pt in b_pts):
+                    pygame.draw.polygon(screen, (210, 180, 140), [pt[:2] for pt in b_pts])
+
             # --- Tee Box ---
             tb_p1l = project(-12, -10, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
             tb_p1r = project(12, -10, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
@@ -1195,6 +1296,36 @@ def main():
                 pygame.draw.line(screen, WHITE, (f[0], f[1]), (f[0], f[1]-max(1, int(12*f[2]))), 2)
                 pygame.draw.rect(screen, RED, (f[0], f[1]-max(1, int(12*f[2])), max(1, int(4*f[2])), max(1, int(3*f[2]))))
             
+            # --- Draw Trees ---
+            trees_to_draw = []
+            for tx, ty, tz, th, tw in trees:
+                dist = math.hypot(tx - cam_x, ty - cam_y)
+                trees_to_draw.append((dist, tx, ty, tz, th, tw))
+            
+            trees_to_draw.sort(key=lambda x: x[0], reverse=True) # Farthest first
+            
+            for dist, tx, ty, tz, th, tw in trees_to_draw:
+                base = project(tx, ty, tz, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if base and base[3] > -14:
+                    top = project(tx, ty, tz + th, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    l_bot = project(tx, ty, tz + th * 0.3, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    if top and l_bot:
+                        # Trunk
+                        trunk_w = max(1, int(tw * 0.3 * base[2]))
+                        pygame.draw.line(screen, BROWN, base[:2], l_bot[:2], trunk_w)
+                        
+                        # Leaves
+                        r1 = max(2, int(tw * 1.2 * l_bot[2]))
+                        pygame.draw.circle(screen, (15, 55, 30), l_bot[:2], r1)
+                        
+                        mid_y = (top[1] + l_bot[1]) // 2
+                        mid_x = (top[0] + l_bot[0]) // 2
+                        r2 = max(2, int(tw * 0.9 * ((top[2]+l_bot[2])/2)))
+                        pygame.draw.circle(screen, (20, 75, 40), (mid_x, mid_y), r2)
+                        
+                        r3 = max(2, int(tw * 0.5 * top[2]))
+                        pygame.draw.circle(screen, (25, 95, 50), top[:2], r3)
+
             # --- Draw Player ---
             if not ball.is_moving:
                 p_angle = math.radians(aim_angle - 90)
@@ -1251,6 +1382,12 @@ def main():
 
             b = project(ball.x, ball.y, ball.z, cam_x, cam_y, cam_angle, curr_w, curr_h)
             if b and b[3] > -14: pygame.draw.circle(screen, WHITE, (b[0], b[1]), max(1, int(0.15*b[2])))
+            
+            # --- Draw Particles (3D) ---
+            for p in particles:
+                p_proj = project(p['x'], p['y'], p['z'], cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if p_proj and p_proj[3] > -14:
+                    pygame.draw.circle(screen, p['color'], p_proj[:2], max(1, int(0.1*p_proj[2])))
 
             # --- Aim Indicator ---
             if not ball.is_moving:
@@ -1325,6 +1462,21 @@ def main():
             pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 - int(g1_w*28), curr_h//2 - int(g1_h*28), int(g1_w*56), int(g1_h*56)))
             pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 + int(ox*28) - int(g2_w*28), curr_h//2 - int(oy*28) - int(g2_h*28), int(g2_w*56), int(g2_h*56)))
             
+            # --- Draw Bunkers in 2D ---
+            for bx, by, br, bz in bunkers:
+                screen_bx = curr_w//2 + int((bx - hole_pos[0]) * 28)
+                screen_by = curr_h//2 - int((by - hole_pos[1]) * 28)
+                screen_br = int(br * 28)
+                
+                if -screen_br < screen_bx < curr_w + screen_br and -screen_br < screen_by < curr_h + screen_br:
+                    b_pts = []
+                    for a in range(0, 360, 20):
+                        rad = math.radians(a)
+                        r_dist = screen_br + math.sin(a * 2.5) * (screen_br * 0.15)
+                        b_pts.append((screen_bx + math.cos(rad)*r_dist, screen_by + math.sin(rad)*r_dist))
+                    if len(b_pts) > 2:
+                        pygame.draw.polygon(screen, (210, 180, 140), b_pts)
+
             # Draw slope grid
             for gy in range(curr_h//2 - 900, curr_h//2 + 900, 70):
                 for gx in range(curr_w//2 - 900, curr_w//2 + 900, 70):
@@ -1358,6 +1510,14 @@ def main():
                     pygame.draw.circle(screen, (255, 100, 100), (px, int(py - pz)), 7)
                     screen.blit(font_small.render(p_id, True, (255, 150, 150)), (px + 10, py - 20))
             
+            # --- Draw Particles (2D) ---
+            for p in particles:
+                screen_px = curr_w//2 + int((p['x'] - hole_pos[0]) * 28)
+                screen_py = curr_h//2 - int((p['y'] - hole_pos[1]) * 28)
+                pz_screen = int(p['z'] * 28)
+                if pz_screen > 0:
+                    pygame.draw.circle(screen, p['color'], (screen_px, screen_py - pz_screen), max(1, int(p['life']/10)))
+                    
             mode_str = f"CHIP ({CLUBS[club_idx][0]})" if ball.chipping else "PUTT"
             lie_str = f"Lie: {ball.lie}%"
             color = WHITE if ball.lie >= 90 else YELLOW
