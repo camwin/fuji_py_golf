@@ -74,6 +74,18 @@ def generate_course():
 
 COURSE = generate_course()
 
+def is_on_green(bx, by, hole_pos, green_shape):
+    g1_w, g1_h = green_shape[0]
+    g2_w, g2_h = green_shape[1]
+    ox, oy = green_shape[2]
+    
+    dx1, dy1 = bx - hole_pos[0], by - hole_pos[1]
+    if (dx1**2 / g1_w**2) + (dy1**2 / g1_h**2) <= 1: return True
+    
+    dx2, dy2 = bx - (hole_pos[0] + ox), by - (hole_pos[1] + oy)
+    if (dx2**2 / g2_w**2) + (dy2**2 / g2_h**2) <= 1: return True
+    return False
+
 class Ball:
     def __init__(self):
         self.x, self.y, self.z = 0, 0, 0
@@ -99,6 +111,9 @@ class Ball:
         self.putt_y = 0
         self.putt_vx = 0
         self.putt_vy = 0
+        self.putt_z = 0
+        self.putt_vz = 0
+        self.chipping = False
         self.ds = None # Drag start
         self.is_dragging = False
 
@@ -409,6 +424,10 @@ def main():
                 if event.key == pygame.K_ESCAPE: running = False
                 if event.key == pygame.K_c: show_scorecard = not show_scorecard
                 
+                if state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0:
+                    if event.key == pygame.K_SPACE:
+                        ball.chipping = not ball.chipping
+
                 if not ball.is_moving and state == "3D":
                     if event.key == pygame.K_w: club_idx = (club_idx - 1) % len(CLUBS)
                     if event.key == pygame.K_s: club_idx = (club_idx + 1) % len(CLUBS)
@@ -424,13 +443,21 @@ def main():
                     is_swinging = False; power = 0.0
 
             # Putting Event Handling
-            if state == "GREEN" and ball.putt_vx == 0:
+            if state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     ball.ds = mouse_pos
                     ball.is_dragging = True
                 if event.type == pygame.MOUSEBUTTONUP and ball.is_dragging:
-                    ball.putt_vx = (ball.ds[0] - mouse_pos[0]) * 0.12
-                    ball.putt_vy = (ball.ds[1] - mouse_pos[1]) * 0.12
+                    power_mult = ball.lie / 100.0
+                    if ball.chipping:
+                        ball.putt_vx = (ball.ds[0] - mouse_pos[0]) * 0.15 * power_mult
+                        ball.putt_vy = (ball.ds[1] - mouse_pos[1]) * 0.15 * power_mult
+                        drag_dist = math.hypot(ball.ds[0] - mouse_pos[0], ball.ds[1] - mouse_pos[1])
+                        ball.putt_vz = drag_dist * 0.15
+                    else:
+                        ball.putt_vx = (ball.ds[0] - mouse_pos[0]) * 0.12 * power_mult
+                        ball.putt_vy = (ball.ds[1] - mouse_pos[1]) * 0.12 * power_mult
+                        ball.putt_vz = 0
                     ball.strokes += 1
                     ball.is_dragging = False
 
@@ -496,7 +523,12 @@ def main():
                     state = "GREEN"
                     ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 10
                     ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 10
-                    ball.lie = 100
+                    if is_on_green(ball.x, ball.y, hole_pos, green_shape):
+                        ball.lie = 100
+                        ball.chipping = False
+                    else:
+                        ball.lie = random.randint(20, 90)
+                        ball.chipping = True if ball.lie < 70 else False
                 else:
                     if abs(ball.x - closest_x) <= closest_w:
                         ball.lie = 100
@@ -504,28 +536,63 @@ def main():
                         ball.lie = random.randint(20, 100)
 
         elif state == "GREEN":
-            ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
-            ball.putt_vx *= 0.97; ball.putt_vy *= 0.97
-            if abs(ball.putt_vx) < 0.05 and abs(ball.putt_vy) < 0.05: 
-                ball.putt_vx = ball.putt_vy = 0
+            was_moving_2d = ball.putt_vx != 0 or ball.putt_vy != 0 or ball.putt_z > 0
             
-            hole_cx, hole_cy = curr_w // 2, curr_h // 2
-            dist_to_hole = math.hypot(ball.putt_x - hole_cx, ball.putt_y - hole_cy)
-            speed = math.hypot(ball.putt_vx, ball.putt_vy)
-            
-            # Physics around the hole (Lip in/out)
-            if 0 < dist_to_hole < 26:
-                # Apply gravity pulling the ball towards the center of the hole
-                pull_strength = (26 - dist_to_hole) * 0.12
-                ball.putt_vx += ((hole_cx - ball.putt_x) / dist_to_hole) * pull_strength
-                ball.putt_vy += ((hole_cy - ball.putt_y) / dist_to_hole) * pull_strength
+            if ball.putt_z > 0 or ball.putt_vz != 0:
+                ball.putt_x += ball.putt_vx
+                ball.putt_y += ball.putt_vy
+                ball.putt_z += ball.putt_vz
+                ball.putt_vz -= 0.8 # Gravity
                 
-                # Faster putts need to hit closer to dead-center to drop
-                drop_threshold = max(4.0, 20.0 - (speed * 3.0))
-                if dist_to_hole < drop_threshold:
-                    state = "HOLE"
-                    scores[hole_idx] = ball.strokes
-                    show_scorecard = True
+                if ball.putt_z <= 0:
+                    ball.putt_z = 0
+                    ball.putt_vz = 0
+                    ball.putt_vx *= 0.4
+                    ball.putt_vy *= 0.4
+            else:
+                ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
+                
+                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 10.0
+                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 10.0
+                
+                if is_on_green(sim_x, sim_y, hole_pos, green_shape):
+                    ball.putt_vx *= 0.97
+                    ball.putt_vy *= 0.97
+                else:
+                    ball.putt_vx *= 0.85
+                    ball.putt_vy *= 0.85
+            
+            is_moving_2d = abs(ball.putt_vx) >= 0.05 or abs(ball.putt_vy) >= 0.05 or ball.putt_z > 0
+            
+            if not is_moving_2d and was_moving_2d:
+                ball.putt_vx = ball.putt_vy = ball.putt_z = 0
+                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 10.0
+                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 10.0
+                if is_on_green(sim_x, sim_y, hole_pos, green_shape):
+                    ball.lie = 100
+                    ball.chipping = False
+                else:
+                    ball.lie = random.randint(20, 90)
+                    ball.chipping = True if ball.lie < 70 else False
+            elif not is_moving_2d:
+                ball.putt_vx = ball.putt_vy = ball.putt_z = 0
+                
+            # Physics around the hole
+            if ball.putt_z == 0:
+                hole_cx, hole_cy = curr_w // 2, curr_h // 2
+                dist_to_hole = math.hypot(ball.putt_x - hole_cx, ball.putt_y - hole_cy)
+                speed = math.hypot(ball.putt_vx, ball.putt_vy)
+                
+                if 0 < dist_to_hole < 26:
+                    pull_strength = (26 - dist_to_hole) * 0.12
+                    ball.putt_vx += ((hole_cx - ball.putt_x) / dist_to_hole) * pull_strength
+                    ball.putt_vy += ((hole_cy - ball.putt_y) / dist_to_hole) * pull_strength
+                    
+                    drop_threshold = max(4.0, 20.0 - (speed * 3.0))
+                    if dist_to_hole < drop_threshold:
+                        state = "HOLE"
+                        scores[hole_idx] = ball.strokes
+                        show_scorecard = True
 
         # --- Rendering ---
         if state == "3D":
@@ -686,10 +753,17 @@ def main():
             # --- FIXED: Putter Line ---
             if ball.is_dragging:
                 # Line from ball to mouse (Slingshot)
-                pygame.draw.line(screen, WHITE, (int(ball.putt_x), int(ball.putt_y)), mouse_pos, 2)
+                pygame.draw.line(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), mouse_pos, 2)
 
-            pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y)), 6)
-            screen.blit(font_med.render("PUTTING: Drag ball BACK to aim at hole", True, WHITE), (40, 40))
+            if ball.putt_z > 0:
+                pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), 6) # shadow
+            pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), 6)
+            
+            mode_str = "CHIP" if ball.chipping else "PUTT"
+            lie_str = f"Lie: {ball.lie}%"
+            color = WHITE if ball.lie >= 90 else YELLOW
+            txt = f"{mode_str} ({lie_str}): Drag BACK to aim. SPACE to toggle."
+            screen.blit(font_med.render(txt, True, color), (40, 40))
 
         elif state == "HOLE":
             screen.fill((0, 0, 0))
