@@ -1,6 +1,11 @@
 import pygame
 import math
 import random
+import socket
+import threading
+import json
+import time
+import uuid
 
 # --- Window Setup ---
 WIDTH, HEIGHT = 1280, 720 
@@ -33,6 +38,65 @@ CLUBS = [
     ["9 Iron", 145, 70, 42.0], ["PW", 125, 80, 46.0], ["GW", 110, 90, 50.0],
     ["SW", 95, 100, 54.0], ["LW", 75, 110, 60.0]
 ]
+
+# --- P2P Networking (IPv6 + Mesh Gossip Discovery) ---
+class P2PNetwork:
+    def __init__(self, port=50505, player_id=None):
+        self.player_id = player_id.strip() if player_id and player_id.strip() else str(uuid.uuid4())[:6]
+        self.port = port
+        self.peers = {}  # Keyed by player_id instead of IP address
+        
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            if hasattr(socket, 'SO_REUSEPORT'):
+                self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except Exception as e:
+            print(f"[P2P] Socket options error: {e}")
+            
+        try:
+            self.sock.bind(('0.0.0.0', port))
+            print(f"[P2P] Bound to port {port} successfully. Player ID: {self.player_id}")
+        except Exception as e:
+            print(f"[P2P] Failed to bind to port {port}: {e}")
+            
+        self.sock.setblocking(False)
+        
+        self.running = True
+        self.listen_thread = threading.Thread(target=self._listen, daemon=True)
+        self.listen_thread.start()
+
+    def _listen(self):
+        print("[P2P] Listening for peers...")
+        while self.running:
+            try:
+                data, addr = self.sock.recvfrom(4096)
+                msg = json.loads(data.decode('utf-8'))
+                
+                if msg['type'] == 'state' and msg['id'] != self.player_id:
+                    p_id = msg['id']
+                    if p_id not in self.peers:
+                        print(f"[P2P] Receiving state from new peer: {p_id} at {addr}")
+                    self.peers[p_id] = {'state': msg['data'], 'last_seen': time.time()}
+                        
+            except (BlockingIOError, OSError):
+                time.sleep(0.01)
+            except Exception as e:
+                print(f"[P2P] Listen error: {e}")
+                time.sleep(0.01)
+
+    def broadcast_state(self, state_dict):
+        msg = {'type': 'state', 'id': self.player_id, 'data': state_dict}
+        data = json.dumps(msg).encode('utf-8')
+        try: 
+            self.sock.sendto(data, ('255.255.255.255', self.port))
+        except Exception: pass
+
+    def get_active_peers(self):
+        now = time.time()
+        self.peers = {p_id: p for p_id, p in self.peers.items() if now - p['last_seen'] <= 5}
+        return [(p_id, p['state']) for p_id, p in self.peers.items()]
 
 def calculate_trackman_stats(club_idx, trajectory_offset, power_mult=1.0):
     base_loft = CLUBS[club_idx][3]
@@ -359,7 +423,7 @@ def project(obj_x, obj_y, obj_z, cam_x, cam_y, cam_angle, w, h):
     sy = horizon + (h - horizon) * (15 / (ry + 15)) - (obj_z * factor)
     return int(sx), int(sy), factor, orig_ry
 
-def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats):
+def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats, active_peers, player_id):
     # --- Club Inventory (Left Side) ---
     pygame.draw.rect(screen, (0,0,0,100), (10, 34, 180, 330))
     for i, c in enumerate(CLUBS):
@@ -373,8 +437,11 @@ def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is
     screen.blit(font_med.render(f"{dist} YDS TO PIN", True, WHITE), (curr_w - 280, 74))
     screen.blit(font_med.render(f"STROKES: {ball.strokes}", True, WHITE), (curr_w - 280, 114))
     
+    screen.blit(font_small.render(f"PLAYER ID: {player_id}", True, YELLOW), (curr_w - 280, 150))
+    screen.blit(font_small.render(f"PEERS ONLINE: {len(active_peers)}", True, (255, 150, 150)), (curr_w - 280, 170))
+    
     # Trackman Data Panel
-    panel_y = 160
+    panel_y = 200
     screen.blit(font_small.render(f"LIE: {ball.lie}%", True, WHITE if ball.lie >= 90 else YELLOW), (curr_w - 280, panel_y))
     
     loft_str = f"+{int(trajectory_offset)}" if trajectory_offset > 0 else str(int(trajectory_offset))
@@ -447,12 +514,14 @@ def draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats):
         screen.blit(font_small.render(f"{chk_adv} Advanced Stats", True, (0, 0, 0)), (70, 54))
         screen.blit(font_small.render("    View Scorecard (C)", True, (0, 0, 0)), (70, 80))
 
-def draw_scorecard(screen, curr_w, curr_h, scores, course):
+def draw_scorecard(screen, curr_w, curr_h, group_scores, course, current_tee_order):
     overlay = pygame.Surface((curr_w, curr_h), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 180))
     screen.blit(overlay, (0, 0))
 
-    sw, sh = 820, 360
+    sw = 820
+    num_players = len(current_tee_order)
+    sh = 240 + (num_players * 30 * 2) 
     sx, sy = curr_w//2 - sw//2, curr_h//2 - sh//2
     pygame.draw.rect(screen, (240, 240, 240), (sx, sy, sw, sh), border_radius=10)
     pygame.draw.rect(screen, HOLE_COLOR, (sx, sy, sw, sh), 4, border_radius=10)
@@ -462,15 +531,20 @@ def draw_scorecard(screen, curr_w, curr_h, scores, course):
 
     def draw_grid(x, y, start_hole, end_hole, label_total1, label_total2=None):
         col_w = 55
+        name_w = 160
         cols = 12 if label_total2 else 11
+        total_width = name_w + col_w * (cols - 1)
         
-        pygame.draw.rect(screen, (200, 200, 200), (x, y, col_w * cols, 30))
+        pygame.draw.rect(screen, (200, 200, 200), (x, y, total_width, 30))
+        
+        def get_cx(i):
+            return x + name_w//2 if i == 0 else x + name_w + (i-1)*col_w + col_w//2
         
         headers = ["HOLE"] + [str(i+1) for i in range(start_hole, end_hole)] + [label_total1]
         if label_total2: headers.append(label_total2)
         for i, h_txt in enumerate(headers):
             surf = font_small.render(h_txt, True, HOLE_COLOR)
-            screen.blit(surf, (x + i*col_w + col_w//2 - surf.get_width()//2, y + 6))
+            screen.blit(surf, (get_cx(i) - surf.get_width()//2, y + 6))
             
         y += 30
         out_par = sum(c["par"] for c in course[start_hole:end_hole])
@@ -478,54 +552,67 @@ def draw_scorecard(screen, curr_w, curr_h, scores, course):
         if label_total2: pars.append(str(sum(c["par"] for c in course)))
         for i, p_txt in enumerate(pars):
             surf = font_small.render(p_txt, True, HOLE_COLOR)
-            screen.blit(surf, (x + i*col_w + col_w//2 - surf.get_width()//2, y + 6))
+            screen.blit(surf, (get_cx(i) - surf.get_width()//2, y + 6))
             
         y += 30
-        out_score = sum(scores[i] for i in range(start_hole, end_hole) if scores[i] is not None)
-        out_score_txt = str(out_score) if any(scores[i] is not None for i in range(start_hole, end_hole)) else "-"
         
-        s_row = ["SCORE"] + [str(scores[i]) if scores[i] is not None else "-" for i in range(start_hole, end_hole)] + [out_score_txt]
-        if label_total2:
-            tot = sum(s for s in scores if s is not None)
-            s_row.append(str(tot) if any(s is not None for s in scores) else "-")
+        for p_idx, p_id in enumerate(current_tee_order):
+            p_scores = group_scores.get(p_id, [None]*18)
+            out_score = sum(p_scores[i] for i in range(start_hole, end_hole) if p_scores[i] is not None)
+            out_score_txt = str(out_score) if any(p_scores[i] is not None for i in range(start_hole, end_hole)) else "-"
+            
+            display_name = p_id[:10]
+            s_row = [display_name] + [str(p_scores[i]) if p_scores[i] is not None else "-" for i in range(start_hole, end_hole)] + [out_score_txt]
+            if label_total2:
+                tot = sum(s for s in p_scores if s is not None)
+                s_row.append(str(tot) if any(s is not None for s in p_scores) else "-")
 
-        for i, s_txt in enumerate(s_row):
-            color = HOLE_COLOR
-            is_score = i > 0 and i <= (end_hole - start_hole) and s_txt != "-"
-            if is_score:
-                diff = int(s_txt) - course[start_hole + i - 1]["par"]
-                if diff < 0: color = RED
-                elif diff > 0: color = (0, 0, 200)
+            for i, s_txt in enumerate(s_row):
+                color = HOLE_COLOR
+                is_score = i > 0 and i <= (end_hole - start_hole) and s_txt != "-"
+                if is_score:
+                    diff = int(s_txt) - course[start_hole + i - 1]["par"]
+                    if diff < 0: color = RED
+                    elif diff > 0: color = (0, 0, 200)
+                    
+                surf = font_small.render(s_txt, True, color)
+                cx = get_cx(i)
+                cy = y + 6 + surf.get_height()//2
                 
-            surf = font_small.render(s_txt, True, color)
-            cx = x + i*col_w + col_w//2
-            cy = y + 6 + surf.get_height()//2
-            
-            if is_score:
-                if diff == -1: # Birdie
-                    pygame.draw.circle(screen, color, (cx, cy), 13, 2)
-                elif diff <= -2: # Eagle or better
-                    pygame.draw.circle(screen, color, (cx, cy), 11, 2)
-                    pygame.draw.circle(screen, color, (cx, cy), 16, 2)
-                elif diff == 1: # Bogey
-                    pygame.draw.rect(screen, color, (cx - 12, cy - 12, 24, 24), 2)
-                elif diff >= 2: # Double Bogey or worse
-                    pygame.draw.rect(screen, color, (cx - 11, cy - 11, 22, 22), 2)
-                    pygame.draw.rect(screen, color, (cx - 16, cy - 16, 32, 32), 2)
+                if is_score:
+                    if diff == -1: # Birdie
+                        pygame.draw.circle(screen, color, (cx, cy), 13, 2)
+                    elif diff <= -2: # Eagle or better
+                        pygame.draw.circle(screen, color, (cx, cy), 11, 2)
+                        pygame.draw.circle(screen, color, (cx, cy), 16, 2)
+                    elif diff == 1: # Bogey
+                        pygame.draw.rect(screen, color, (cx - 12, cy - 12, 24, 24), 2)
+                    elif diff >= 2: # Double Bogey or worse
+                        pygame.draw.rect(screen, color, (cx - 11, cy - 11, 22, 22), 2)
+                        pygame.draw.rect(screen, color, (cx - 16, cy - 16, 32, 32), 2)
 
-            screen.blit(surf, (cx - surf.get_width()//2, y + 6))
+                screen.blit(surf, (cx - surf.get_width()//2, y + 6))
+            y += 30
             
-        for r in range(4): pygame.draw.line(screen, GRAY, (x, y - 60 + r*30), (x + cols*col_w, y - 60 + r*30))
-        for c in range(cols + 1): pygame.draw.line(screen, GRAY, (x + c*col_w, y - 60), (x + c*col_w, y + 30))
+        total_rows = 2 + num_players
+        start_y = y - (total_rows * 30)
+        for r in range(total_rows + 1): pygame.draw.line(screen, GRAY, (x, start_y + r*30), (x + total_width, start_y + r*30))
+        pygame.draw.line(screen, GRAY, (x, start_y), (x, start_y + total_rows*30))
+        for c in range(cols): pygame.draw.line(screen, GRAY, (x + name_w + c*col_w, start_y), (x + name_w + c*col_w, start_y + total_rows*30))
 
-    draw_grid(curr_w//2 - (55*11)//2, sy + 90, 0, 9, "OUT")
-    draw_grid(curr_w//2 - (55*12)//2, sy + 210, 9, 18, "IN", "TOT")
+    grid1_y = sy + 70
+    grid2_y = grid1_y + 30 * (2 + num_players) + 20
+    draw_grid(curr_w//2 - (160 + 55*10)//2, grid1_y, 0, 9, "OUT")
+    draw_grid(curr_w//2 - (160 + 55*11)//2, grid2_y, 9, 18, "IN", "TOT")
     
+    close_y = grid2_y + 30 * (2 + num_players) + 20
     close_txt = font_small.render("Press 'C' to Close Scorecard", True, GRAY)
-    screen.blit(close_txt, (curr_w//2 - close_txt.get_width()//2, sy + 320))
+    screen.blit(close_txt, (curr_w//2 - close_txt.get_width()//2, close_y))
 
 def main():
     difficulty = None
+    player_name = ""
+    input_active = False
     options = [
         {"text": "1. Beginner (No Wind)", "diff": 0, "rect": pygame.Rect(0, 0, 0, 0)},
         {"text": "2. Amateur (Light Wind)", "diff": 15, "rect": pygame.Rect(0, 0, 0, 0)},
@@ -540,8 +627,17 @@ def main():
         screen.blit(title, (curr_w//2 - title.get_width()//2, 120))
         
         mouse_pos = pygame.mouse.get_pos()
+        
+        name_rect = pygame.Rect(curr_w//2 - 200, 190, 400, 50)
+        is_hover_name = name_rect.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, FAIRWAY if is_hover_name or input_active else ROUGH, name_rect, border_radius=8)
+        pygame.draw.rect(screen, YELLOW if input_active else WHITE, name_rect, 2, border_radius=8)
+        cursor = "_" if input_active and time.time() % 1 < 0.5 else ""
+        name_surf = font_med.render(f"Name: {player_name}{cursor}", True, WHITE)
+        screen.blit(name_surf, (name_rect.x + 15, name_rect.centery - name_surf.get_height()//2))
+        
         for i, opt in enumerate(options):
-            rect = pygame.Rect(curr_w//2 - 200, 220 + i * 70, 400, 50)
+            rect = pygame.Rect(curr_w//2 - 200, 260 + i * 70, 400, 50)
             opt["rect"] = rect
             is_hover = rect.collidepoint(mouse_pos)
             
@@ -558,10 +654,23 @@ def main():
                 if e.key == pygame.K_1: difficulty = 0
                 if e.key == pygame.K_2: difficulty = 8
                 if e.key == pygame.K_3: difficulty = 18
+                if input_active:
+                    if e.key == pygame.K_RETURN:
+                        input_active = False
+                    elif e.key == pygame.K_BACKSPACE:
+                        player_name = player_name[:-1]
+                    elif len(player_name) < 10 and e.unicode.isprintable():
+                        player_name += e.unicode
             if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-                for opt in options:
-                    if opt["rect"].collidepoint(e.pos):
-                        difficulty = opt["diff"]
+                if name_rect.collidepoint(e.pos):
+                    input_active = True
+                else:
+                    input_active = False
+                    for opt in options:
+                        if opt["rect"].collidepoint(e.pos):
+                            difficulty = opt["diff"]
+                        
+    network = P2PNetwork(player_id=player_name)
 
     hole_idx = 0
     scores = [None] * 18
@@ -574,7 +683,8 @@ def main():
     green_z = hole_data["green_z"]
 
     ball = Ball()
-    wx, wy = random.uniform(-difficulty, difficulty), random.uniform(-difficulty, difficulty)
+    wind_rng = random.Random(312 + hole_idx)
+    wx, wy = wind_rng.uniform(-difficulty, difficulty), wind_rng.uniform(-difficulty, difficulty)
     cam_x, cam_y = 0, -20
     aim_angle = math.degrees(math.atan2(hole_pos[0], hole_pos[1]))
     cam_angle = aim_angle
@@ -591,12 +701,58 @@ def main():
     msg_text = ""
     msg_timer = 0
     active_menu = None
+    
+    current_tee_order = [network.player_id]
+    peer_hole_scores = {}
 
     running = True
     while running:
         curr_w, curr_h = screen.get_size()
         mouse_pos = pygame.mouse.get_pos()
         screen.fill(SKY)
+        
+        # Update network state
+        my_state = {
+            'hole': hole_idx,
+            'state': state,
+            'strokes': ball.strokes,
+            'x': ball.x,
+            'y': ball.y,
+            'z': ball.z,
+            'putt_x': ball.putt_x,
+            'putt_y': ball.putt_y,
+            'putt_z': ball.putt_z,
+            'scores': scores
+        }
+        network.broadcast_state(my_state)
+        active_peers = network.get_active_peers()
+
+        # Grouping and Tee Order Tracking
+        for p_id, p_state in active_peers:
+            if p_state['hole'] == hole_idx and p_id not in current_tee_order:
+                current_tee_order.append(p_id)
+            if p_state['state'] == "HOLE":
+                if p_id not in peer_hole_scores:
+                    peer_hole_scores[p_id] = {}
+                peer_hole_scores[p_id][p_state['hole']] = p_state['strokes']
+
+        my_turn = True
+        waiting_on = None
+        if ball.strokes == 0 and state == "3D" and not ball.is_moving:
+            my_idx = current_tee_order.index(network.player_id)
+            for before_id in current_tee_order[:my_idx]:
+                peer_state = next((p for p_id, p in active_peers if p_id == before_id), None)
+                if peer_state and peer_state['hole'] == hole_idx and peer_state['strokes'] == 0:
+                    my_turn = False
+                    waiting_on = before_id
+                    break
+                    
+        waiting_for_others = False
+        if state == "HOLE":
+            group_active_peers = {p_id: p for p_id, p in active_peers if p_id in current_tee_order}
+            for p_id, p in group_active_peers.items():
+                if p['hole'] == hole_idx and p['state'] != "HOLE":
+                    waiting_for_others = True
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT: running = False
@@ -638,7 +794,11 @@ def main():
                     if event.key == pygame.K_w: club_idx = (club_idx - 1) % len(CLUBS)
                     if event.key == pygame.K_s: club_idx = (club_idx + 1) % len(CLUBS)
                     if event.key == pygame.K_SPACE:
-                        is_swinging = True; power = 0.0
+                        if my_turn:
+                            is_swinging = True; power = 0.0
+                        else:
+                            msg_text = f"WAIT FOR {waiting_on} TO TEE OFF!"
+                            msg_timer = 60
 
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_SPACE and is_swinging:
@@ -673,27 +833,46 @@ def main():
 
             if state == "HOLE":
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                    show_scorecard = False
-                    hole_idx += 1
-                    if hole_idx >= len(COURSE):
-                        main() # Restart game if 18 holes are finished
-                        return
-                    hole_data = COURSE[hole_idx]
-                    hole_pos = hole_data["hole_pos"]
-                    fairway_nodes = hole_data["fairway"]
-                    par = hole_data["par"]
-                    green_shape = hole_data["green"]
-                    slope_waves = hole_data["slope_waves"]
-                    green_z = hole_data["green_z"]
-                    ball = Ball()
-                    wx, wy = random.uniform(-difficulty, difficulty), random.uniform(-difficulty, difficulty)
-                    cam_x, cam_y = 0, -20
-                    aim_angle = math.degrees(math.atan2(hole_pos[0], hole_pos[1]))
-                    cam_angle = aim_angle
-                    trajectory_offset = 0.0
-                    face_angle = 0.0
-                    state = "3D"
-                    is_swinging = False; power = 0.0
+                    if waiting_for_others:
+                        msg_text = "WAITING FOR GROUP TO FINISH"
+                        msg_timer = 60
+                    else:
+                        show_scorecard = False
+                        
+                        # Calculate Next Tee Order
+                        scores_for_sort = {network.player_id: ball.strokes}
+                        for p_id in current_tee_order:
+                            if p_id == network.player_id: continue
+                            scores_for_sort[p_id] = peer_hole_scores.get(p_id, {}).get(hole_idx, 999)
+                            
+                        def sort_key(p_id):
+                            score = scores_for_sort.get(p_id, 999)
+                            tiebreaker = current_tee_order.index(p_id) if p_id in current_tee_order else 999
+                            return (score, tiebreaker)
+                            
+                        current_tee_order = sorted(current_tee_order, key=sort_key)
+                        
+                        hole_idx += 1
+                        if hole_idx >= len(COURSE):
+                            main() # Restart game if 18 holes are finished
+                            return
+                        hole_data = COURSE[hole_idx]
+                        hole_pos = hole_data["hole_pos"]
+                        fairway_nodes = hole_data["fairway"]
+                        par = hole_data["par"]
+                        green_shape = hole_data["green"]
+                        slope_waves = hole_data["slope_waves"]
+                        green_z = hole_data["green_z"]
+                        ball = Ball()
+                        wind_rng = random.Random(312 + hole_idx)
+                        wx, wy = wind_rng.uniform(-difficulty, difficulty), wind_rng.uniform(-difficulty, difficulty)
+                        cam_x, cam_y = 0, -20
+                        aim_angle = math.degrees(math.atan2(hole_pos[0], hole_pos[1]))
+                        cam_angle = aim_angle
+                        trajectory_offset = 0.0
+                        face_angle = 0.0
+                        state = "3D"
+                        is_swinging = False; power = 0.0
 
         if is_swinging:
             power += 0.015
@@ -1047,6 +1226,14 @@ def main():
                         ch = max(1, int((0.8 if club_idx <= 2 else 0.25) * club_head[2]))
                         club_rect = pygame.Rect(club_head[0]-cw, club_head[1]-ch, cw*2, ch*2)
                         pygame.draw.ellipse(screen, (100, 100, 100), club_rect)
+                        
+            # --- Draw Peers in 3D ---
+            for p_id, p_state in active_peers:
+                if p_state['hole'] == hole_idx and p_state['state'] == "3D":
+                    p_b = project(p_state['x'], p_state['y'], p_state['z'], cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    if p_b and p_b[3] > -14:
+                        pygame.draw.circle(screen, (255, 100, 100), (p_b[0], p_b[1]), max(1, int(0.15*p_b[2])))
+                        screen.blit(font_small.render(p_id, True, (255, 150, 150)), (p_b[0] + 10, p_b[1] - 10))
 
             b = project(ball.x, ball.y, ball.z, cam_x, cam_y, cam_angle, curr_w, curr_h)
             if b and b[3] > -14: pygame.draw.circle(screen, WHITE, (b[0], b[1]), max(1, int(0.15*b[2])))
@@ -1110,7 +1297,11 @@ def main():
                 controls_txt = "ARROWS: Aim/Loft  |  A/D: Face Angle  |  W/S: Change Club  |  SPACE: Swing"
                 screen.blit(font_small.render(controls_txt, True, WHITE), (20, curr_h - 30))
 
-            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats)
+            if not my_turn and state == "3D" and ball.strokes == 0:
+                wait_txt = font_med.render(f"Waiting for {waiting_on} to Tee Off...", True, YELLOW)
+                screen.blit(wait_txt, (curr_w//2 - wait_txt.get_width()//2, 100))
+
+            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats, active_peers, network.player_id)
 
         elif state == "GREEN":
             screen.fill(ROUGH)
@@ -1145,6 +1336,14 @@ def main():
                 pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), 7) # shadow
             pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), 7)
             
+            # --- Draw Peers in 2D ---
+            for p_id, p_state in active_peers:
+                if p_state['hole'] == hole_idx and p_state['state'] == "GREEN":
+                    px, py, pz = int(p_state['putt_x']), int(p_state['putt_y']), p_state['putt_z']
+                    if pz > 0: pygame.draw.circle(screen, (0, 0, 0), (px, py), 7)
+                    pygame.draw.circle(screen, (255, 100, 100), (px, int(py - pz)), 7)
+                    screen.blit(font_small.render(p_id, True, (255, 150, 150)), (px + 10, py - 20))
+            
             mode_str = f"CHIP ({CLUBS[club_idx][0]})" if ball.chipping else "PUTT"
             lie_str = f"Lie: {ball.lie}%"
             color = WHITE if ball.lie >= 90 else YELLOW
@@ -1172,7 +1371,10 @@ def main():
             screen.blit(msg2, (curr_w//2 - msg2.get_width()//2, curr_h//2 - 10))
             screen.blit(msg3, (curr_w//2 - msg3.get_width()//2, curr_h//2 + 40))
             
-            msg_restart = font_med.render("Press SPACE for Next Hole", True, WHITE)
+            if waiting_for_others:
+                msg_restart = font_med.render("Waiting for Group to Finish...", True, YELLOW)
+            else:
+                msg_restart = font_med.render("Press SPACE for Next Hole", True, WHITE)
             screen.blit(msg_restart, (curr_w//2 - msg_restart.get_width()//2, curr_h//2 + 100))
 
         if msg_timer > 0:
@@ -1186,7 +1388,18 @@ def main():
         draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats)
         
         if show_scorecard:
-            draw_scorecard(screen, curr_w, curr_h, scores, COURSE)
+            group_scores = {network.player_id: scores}
+            for p_id, p_state in active_peers:
+                if p_id in current_tee_order:
+                    if 'scores' in p_state:
+                        group_scores[p_id] = p_state['scores']
+                    else:
+                        p_scores = [None] * 18
+                        for h, s in peer_hole_scores.get(p_id, {}).items():
+                            p_scores[h] = s
+                        group_scores[p_id] = p_scores
+                        
+            draw_scorecard(screen, curr_w, curr_h, group_scores, COURSE, current_tee_order)
 
         pygame.display.flip()
         clock.tick(60)
