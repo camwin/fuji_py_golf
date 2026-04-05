@@ -1,3 +1,5 @@
+import os
+import sys
 import pygame
 import math
 import random
@@ -12,6 +14,18 @@ WIDTH, HEIGHT = 1280, 720
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
 pygame.display.set_caption("Meigs Field Golf Course")
+
+def get_resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+try:
+    pygame.display.set_icon(pygame.image.load(get_resource_path("icon.ico")))
+except Exception:
+    pass
 
 clock = pygame.time.Clock()
 font_large = pygame.font.SysFont("Verdana", 42, bold=True)

@@ -1,7 +1,7 @@
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-ENV/
-.env
+# PyInstaller build folders and files
+build/
+*.spec
+
+# Ignore everything in the dist directory EXCEPT for .exe files
+dist/*
+!dist/*.exe
