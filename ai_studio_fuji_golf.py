@@ -479,11 +479,13 @@ def main():
             if was_moving and not ball.is_moving:
                 # Find nearest fairway node to determine boundaries dynamically
                 closest_x = 0
+                closest_w = 30
                 min_dist = 9999
                 for y, x, w in fairway_nodes:
                     if abs(y - ball.y) < min_dist:
                         min_dist = abs(y - ball.y)
                         closest_x = x
+                        closest_w = w
                         
                 if abs(ball.x - closest_x) > 80 or ball.y < -50 or ball.y > hole_pos[1] + 50:
                     ball.strokes += 2
@@ -494,6 +496,12 @@ def main():
                     state = "GREEN"
                     ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 10
                     ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 10
+                    ball.lie = 100
+                else:
+                    if abs(ball.x - closest_x) <= closest_w:
+                        ball.lie = 100
+                    else:
+                        ball.lie = random.randint(20, 100)
 
         elif state == "GREEN":
             ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
@@ -628,8 +636,9 @@ def main():
 
             # --- Aim Indicator ---
             if not ball.is_moving:
-                adj_dist = CLUBS[club_idx][1] - (trajectory_offset * 2.5)
-                adj_height = CLUBS[club_idx][2] + (trajectory_offset * 1.5)
+                lie_mult = ball.lie / 100.0
+                adj_dist = (CLUBS[club_idx][1] - (trajectory_offset * 2.5)) * lie_mult
+                adj_height = (CLUBS[club_idx][2] + (trajectory_offset * 1.5)) * lie_mult
                 base_target_x = ball.x + adj_dist * math.sin(math.radians(aim_angle))
                 base_target_y = ball.y + adj_dist * math.cos(math.radians(aim_angle))
                 
