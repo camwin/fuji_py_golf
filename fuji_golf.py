@@ -27,66 +27,161 @@ BROWN = (101, 67, 33)
 
 # --- Club Data ---
 CLUBS = [
-    ["Driver", 265, 25], ["3 Wood", 240, 30], ["5 Wood", 220, 35],
-    ["3 Iron", 205, 40], ["4 Iron", 195, 45], ["5 Iron", 185, 50],
-    ["6 Iron", 175, 55], ["7 Iron", 165, 60], ["8 Iron", 155, 65],
-    ["9 Iron", 145, 70], ["PW", 125, 80], ["GW", 110, 90],
-    ["SW", 95, 100], ["LW", 75, 110]
+    ["Driver", 265, 25, 10.0], ["3 Wood", 240, 30, 15.0], ["5 Wood", 220, 35, 18.0],
+    ["3 Iron", 205, 40, 21.0], ["4 Iron", 195, 45, 24.0], ["5 Iron", 185, 50, 27.0],
+    ["6 Iron", 175, 55, 30.0], ["7 Iron", 165, 60, 34.0], ["8 Iron", 155, 65, 38.0],
+    ["9 Iron", 145, 70, 42.0], ["PW", 125, 80, 46.0], ["GW", 110, 90, 50.0],
+    ["SW", 95, 100, 54.0], ["LW", 75, 110, 60.0]
 ]
+
+def calculate_trackman_stats(club_idx, trajectory_offset, power_mult=1.0):
+    base_loft = CLUBS[club_idx][3]
+    base_aoa = -(base_loft / 8.0) + 3.0
+    
+    dynamic_loft = base_loft + trajectory_offset
+    aoa = base_aoa + (trajectory_offset * 0.5)
+    
+    launch_angle = dynamic_loft * 0.85 + aoa * 0.15
+    spin_loft = dynamic_loft - aoa
+    
+    # Trackman physics: Spin peaks around 45 degrees of spin loft.
+    if spin_loft <= 45:
+        effective_spin_loft = spin_loft
+    else:
+        effective_spin_loft = 45 - (spin_loft - 45) * 0.8
+        
+    rpm = max(500, int(effective_spin_loft * 240 * power_mult))
+    return dynamic_loft, launch_angle, spin_loft, rpm
+
+def apply_wind_physics(base_dist, base_height, aim_angle, wx, wy, rpm):
+    rad = math.radians(aim_angle)
+    shot_dx = math.sin(rad)
+    shot_dy = math.cos(rad)
+    
+    # Calculate tailwind (positive means wind is blowing with the shot)
+    tailwind = wx * shot_dx + wy * shot_dy
+    headwind = -tailwind
+    
+    # Crosswind vector (perpendicular to shot)
+    cross_dx = math.cos(rad)
+    cross_dy = -math.sin(rad)
+    crosswind_mag = wx * cross_dx + wy * cross_dy
+    
+    # High spin violently magnifies the lifting effect of a headwind (ballooning)
+    spin_factor = rpm / 3000.0
+    
+    if headwind > 0:
+        dist_mult = 1.0 - (headwind * 0.005) - (headwind * spin_factor * 0.004)
+        height_mult = 1.0 + (headwind * 0.005) + (headwind * spin_factor * 0.006)
+    else:
+        # Tailwind knocks the ball down slightly and carries it
+        dist_mult = 1.0 - (headwind * 0.006) 
+        height_mult = 1.0 + (headwind * 0.004)
+        
+    # Return adjusted flight stats and the pure lateral crosswind components
+    return max(0.1, base_dist * dist_mult), max(0.1, base_height * height_mult), crosswind_mag * cross_dx, crosswind_mag * cross_dy
+
+def generate_skyline():
+    buildings = []
+    random.seed(312) # Chicago area code for a consistent skyline
+    # Background layer
+    for _ in range(70):
+        angle = random.uniform(190, 350)
+        w = random.uniform(1.0, 3.0)
+        h = random.uniform(30, 90)
+        color = random.choice([(70,75,80), (80,85,90), (60,65,70)])
+        buildings.append((angle, w, h, color))
+    # Foreground layer
+    for _ in range(50):
+        angle = random.uniform(190, 350)
+        w = random.uniform(1.5, 4.0)
+        h = random.uniform(50, 150)
+        color = random.choice([(40,40,40), (30,35,40), (20,25,30), (50,50,60)])
+        buildings.append((angle, w, h, color))
+    # Iconic buildings
+    buildings.append((270, 4.5, 260, (15, 15, 15), "SEARS"))
+    buildings.append((300, 3.5, 230, (25, 25, 25), "HANCOCK"))
+    buildings.append((285, 3.5, 210, (220, 220, 220), "AON"))
+    return buildings
+
+SKYLINE = generate_skyline()
+
+def get_elevation(x, y, fairway_nodes, green_z):
+    if not fairway_nodes: return 0.0
+    if y <= fairway_nodes[0][0]: return fairway_nodes[0][3]
+    if y >= fairway_nodes[-1][0]: return green_z
+    for i in range(len(fairway_nodes)-1):
+        if fairway_nodes[i][0] <= y <= fairway_nodes[i+1][0]:
+            t = (y - fairway_nodes[i][0]) / (fairway_nodes[i+1][0] - fairway_nodes[i][0])
+            return fairway_nodes[i][3] + t * (fairway_nodes[i+1][3] - fairway_nodes[i][3])
+    return 0.0
 
 def generate_course():
     course = []
-    # Hole 1: Par 4, 400y (S-Curve)
-    course.append({
-        "par": 4, "hole_pos": (0, 400), 
-        "fairway": [(y, math.sin(y*0.02)*12, 35) for y in range(40, 401, 20)],
-        "green": ((16, 22), (20, 14), (5, -5)),
-        "slope_waves": [(0.008, 0.15, 0.15, 1.5, 0.5), (0.005, 0.25, 0.25, 0.5, 1.5)]
-    })
-    # Hole 2: Par 3, 180y (Short, angled slightly right)
-    course.append({
-        "par": 3, "hole_pos": (20, 180), 
-        "fairway": [(y, y*0.1, 25) for y in range(20, 181, 20)],
-        "green": ((14, 18), (20, 12), (-5, 5)),
-        "slope_waves": [(0.009, 0.12, 0.16, 2.5, 1.0), (0.006, 0.22, 0.28, 1.0, 2.0)]
-    })
-    # Hole 3: Par 5, 550y (Dogleg left)
-    course.append({
-        "par": 5, "hole_pos": (-80, 550), 
-        "fairway": [(y, -math.pow(y/100, 2)*2.5, 35) for y in range(40, 551, 20)],
-        "green": ((18, 18), (22, 14), (0, 0)),
-        "slope_waves": [(0.008, 0.1, 0.15, 0, 3), (0.006, 0.2, 0.25, 1.5, 0)]
-    })
-    # Generate remaining 15 holes to make a full 18
-    pars = [4, 4, 3, 4, 5, 4, 4, 3, 4, 5, 4, 4, 3, 5, 4]
+    # Generate 18 holes
+    pars = [4, 4, 3, 4, 5, 4, 4, 3, 4, 5, 4, 4, 3, 5, 4, 4, 3, 5]
     for i, p in enumerate(pars):
         if p == 3: dist = random.randint(140, 200)
         elif p == 4: dist = random.randint(350, 450)
         else: dist = random.randint(500, 600)
         curve_dir = 12 if i % 2 == 0 else -12
         
-        gw1, gh1 = random.uniform(12, 20), random.uniform(15, 25)
-        gw2, gh2 = random.uniform(15, 25), random.uniform(12, 20)
-        ox, oy = random.uniform(-10, 10), random.uniform(-10, 10)
+        gw1, gh1 = random.uniform(10, 16), random.uniform(12, 18)
+        gw2, gh2 = random.uniform(12, 18), random.uniform(10, 16)
+        ox, oy = random.uniform(-6, 6), random.uniform(-6, 6)
+        
+        hole_x = math.sin(dist*0.01)*curve_dir
+        
+        fairway = []
+        for y in range(-20, dist+41, 20):
+            z = math.sin(y * 0.02 + i) * 6.0 if p != 3 else 0.0
+            x = math.sin(y*0.01)*curve_dir
+            fairway.append((y, x, random.uniform(25, 35), z))
+            
+        green_z = fairway[-1][3]
+        
+        bunkers = []
+        # Bunkers guarding the green
+        bunkers.append((hole_x + random.choice([-15, 15]), dist + random.choice([-10, 10]), random.uniform(5, 9), green_z))
+        if p > 3:
+            fy = dist * random.uniform(0.5, 0.8)
+            fx = math.sin(fy*0.01)*curve_dir + random.choice([-20, 20])
+            fz = math.sin(fy * 0.02 + i) * 6.0
+            bunkers.append((fx, fy, random.uniform(6, 12), fz))
+            
+        trees = []
+        for _ in range(10 + p*6):
+            ty = random.uniform(20, dist + 20)
+            tx = math.sin(ty*0.01)*curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
+            tz = math.sin(ty * 0.02 + i) * 6.0
+            trees.append((tx, ty, tz, random.uniform(20, 50), random.uniform(4, 9)))
+            
         course.append({
             "par": p, "hole_pos": (math.sin(dist*0.01)*curve_dir, dist), 
-            "fairway": [(y, math.sin(y*0.01)*curve_dir, 30) for y in range(40, dist+1, 20)],
+            "fairway": fairway,
             "green": ((gw1, gh1), (gw2, gh2), (ox, oy)),
             "slope_waves": [
                 (random.uniform(0.005, 0.010), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
                 (random.uniform(0.002, 0.006), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
-            ]
+            ],
+            "green_z": green_z,
+            "bunkers": bunkers,
+            "trees": trees
         })
     return course
 
 COURSE = generate_course()
 
-def get_slope(x, y, waves):
+def get_slope(x, y, waves, hole_pos):
     sx, sy = 0.0, 0.0
     for amp, fx, fy, px, py in waves:
         sx += math.cos(x * fx + px) * amp
         sy += math.sin(y * fy + py) * amp
-    return sx, sy
+        
+    # Flatten the green near the hole
+    dist = math.hypot(x - hole_pos[0], y - hole_pos[1])
+    attenuation = min(1.0, dist / 4.0)
+    return sx * attenuation, sy * attenuation
 
 def is_on_green(bx, by, hole_pos, green_shape):
     g1_w, g1_h = green_shape[0]
@@ -98,6 +193,18 @@ def is_on_green(bx, by, hole_pos, green_shape):
     
     dx2, dy2 = bx - (hole_pos[0] + ox), by - (hole_pos[1] + oy)
     if (dx2**2 / g2_w**2) + (dy2**2 / g2_h**2) <= 1: return True
+    return False
+
+def is_in_chipping_range(bx, by, hole_pos, green_shape, buffer_yards=4):
+    g1_w, g1_h = green_shape[0]
+    g2_w, g2_h = green_shape[1]
+    ox, oy = green_shape[2]
+    
+    dx1, dy1 = bx - hole_pos[0], by - hole_pos[1]
+    if (dx1**2 / (g1_w + buffer_yards)**2) + (dy1**2 / (g1_h + buffer_yards)**2) <= 1: return True
+    
+    dx2, dy2 = bx - (hole_pos[0] + ox), by - (hole_pos[1] + oy)
+    if (dx2**2 / (g2_w + buffer_yards)**2) + (dy2**2 / (g2_h + buffer_yards)**2) <= 1: return True
     return False
 
 class Ball:
@@ -113,6 +220,9 @@ class Ball:
         
         self.rpm = 0
         self.loft_offset = 0.0
+        self.dynamic_loft = 0.0
+        self.launch_angle = 0.0
+        self.spin_loft = 0.0
         self.dist = 0
         self.height = 0
         self.angle = 0
@@ -130,43 +240,67 @@ class Ball:
         self.chipping = False
         self.ds = None # Drag start
         self.is_dragging = False
+        self.curve_accel_x = 0.0
+        self.curve_accel_y = 0.0
 
-    def start_flight(self, dist, height, angle, wx, wy, power_mult, loft_offset, club_idx):
+    def start_flight(self, dist, height, angle, wx, wy, power_mult, loft_offset, club_idx, face_angle):
         self.prev_x, self.prev_y = self.x, self.y
         self.is_moving = True
         self.flight_progress = 0
         self.bounce_count = 0
         self.loft_offset = loft_offset
-        self.rpm = max(500, int((2000 + (club_idx * 300) + (loft_offset * 150)) * power_mult))
         
-        rad = math.radians(angle)
-        actual_dist = (dist * power_mult) * random.uniform(0.98, 1.02)
+        d_loft, l_angle, s_loft, self.rpm = calculate_trackman_stats(club_idx, loft_offset, power_mult)
+        self.dynamic_loft = d_loft
+        self.launch_angle = l_angle
+        self.spin_loft = s_loft
+
+        # 9 Ball Flight Laws: Initial direction is mostly face angle (85%) + club path (15%)
+        start_angle = angle + (face_angle * 0.85)
+        spin_axis = face_angle * 4.0
+        spin_eff = math.cos(math.radians(spin_axis))
+
+        rad = math.radians(start_angle)
+        # Spin axis tilt reduces carry distance slightly (glancing blow inefficiency)
+        actual_dist = (dist * power_mult) * random.uniform(0.98, 1.02) * max(0.7, spin_eff)
+        base_height = height * power_mult
         
-        self.dist = actual_dist
-        self.height = height * power_mult
-        self.angle = angle
+        # Apply Aerodynamic Wind & Spin calculations
+        adj_dist, adj_height, lat_wx, lat_wy = apply_wind_physics(actual_dist, base_height, start_angle, wx, wy, self.rpm)
+        
+        self.dist = adj_dist
+        self.height = adj_height
+        self.angle = start_angle
         self.flight_duration = 100
         
         self.vy = (self.dist / self.flight_duration) * math.cos(rad)
         self.vx = (self.dist / self.flight_duration) * math.sin(rad)
         self.max_height = self.height
-        self.wind_x, self.wind_y = wx / 70.0, wy / 70.0
+        
+        # Curve acceleration based on spin axis (face to path difference)
+        self.curve_accel_x = math.cos(rad) * face_angle * 0.001 * (self.rpm / 2000.0)
+        self.curve_accel_y = -math.sin(rad) * face_angle * 0.001 * (self.rpm / 2000.0)
+
+        # Use purely the lateral wind for crosswind drift over time
+        self.wind_x, self.wind_y = lat_wx / 60.0, lat_wy / 60.0
         self.strokes += 1
 
     def start_bounce(self):
         self.bounce_count += 1
         self.flight_progress = 0
         
-        # High RPM reduces forward bounce or causes backspin!
-        # Reduced base dampening to prevent 400+ yard driver rolls
-        dist_damp = 0.15 - ((self.rpm - 2000) / 10000.0) 
-        dist_damp = max(-0.15, min(0.25, dist_damp))
+        # High RPM reduces forward bounce or causes backspin
+        # Adjusted to be more realistic (max ~4% backspin instead of 15%)
+        spin_effect = (self.rpm - 2500) / 30000.0
+        dist_damp = 0.15 - spin_effect
+        dist_damp = max(-0.04, min(0.25, dist_damp))
         
         height_damp = 0.2 + (self.loft_offset / 120.0)
         height_damp = max(0.1, min(0.3, height_damp))
         
         self.dist *= dist_damp
         self.height *= height_damp
+        old_flight_duration = self.flight_duration
         self.flight_duration = max(5, int(self.flight_duration * 0.6))
         self.rpm = int(self.rpm * 0.5) # Spin decays after hitting the ground
         
@@ -174,18 +308,24 @@ class Ball:
             self.is_moving = False
             self.z = 0
         else:
-            rad = math.radians(self.angle)
-            self.vy = (self.dist / self.flight_duration) * math.cos(rad)
-            self.vx = (self.dist / self.flight_duration) * math.sin(rad)
+            # Maintain the current trajectory vector instead of resetting to aim angle
+            self.angle = math.degrees(math.atan2(self.vx, self.vy))
+            self.vx = self.vx * dist_damp * (old_flight_duration / self.flight_duration)
+            self.vy = self.vy * dist_damp * (old_flight_duration / self.flight_duration)
             self.max_height = self.height
             self.wind_x *= 0.5
             self.wind_y *= 0.5
+            self.curve_accel_x *= 0.3
+            self.curve_accel_y *= 0.3
 
     def update(self):
         if self.is_moving:
             self.flight_progress += 1
             t = self.flight_progress / self.flight_duration
             self.z = 4 * self.max_height * t * (1 - t)
+            
+            self.vx += self.curve_accel_x
+            self.vy += self.curve_accel_y
             
             # Wind affects the ball more at higher altitudes
             altitude_wind_mult = self.z / 40.0
@@ -205,15 +345,21 @@ def project(obj_x, obj_y, obj_z, cam_x, cam_y, cam_angle, w, h):
     rx = rel_x * math.cos(rad) - rel_y * math.sin(rad)
     ry = rel_x * math.sin(rad) + rel_y * math.cos(rad)
     
-    if ry < -10: 
-        ry = -10  # Clamp to a near plane so ground polys stretch off the bottom of the screen!
+    orig_ry = ry
+    NEAR_PLANE = -14.0
+    if ry < NEAR_PLANE:
+        # Correctly clip the point to the near plane to prevent wide stretching
+        scale = NEAR_PLANE / ry
+        rx = rx * scale
+        ry = NEAR_PLANE
+            
     factor = (h * 0.5) / (ry + 15)
     sx = (w // 2) + (rx * factor)
     horizon = h * 0.38
     sy = horizon + (h - horizon) * (15 / (ry + 15)) - (obj_z * factor)
-    return int(sx), int(sy), factor
+    return int(sx), int(sy), factor, orig_ry
 
-def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, cam_angle, hole_idx, par):
+def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats):
     # --- Club Inventory (Left Side) ---
     pygame.draw.rect(screen, (0,0,0,100), (10, 34, 180, 330))
     for i, c in enumerate(CLUBS):
@@ -226,15 +372,35 @@ def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is
     dist = int(math.hypot(ball.x-hole_pos[0], ball.y-hole_pos[1]))
     screen.blit(font_med.render(f"{dist} YDS TO PIN", True, WHITE), (curr_w - 280, 74))
     screen.blit(font_med.render(f"STROKES: {ball.strokes}", True, WHITE), (curr_w - 280, 114))
-    screen.blit(font_med.render(f"LIE: {ball.lie}%", True, WHITE if ball.lie >= 90 else YELLOW), (curr_w - 280, 154))
-    loft_str = f"+{int(trajectory_offset)}" if trajectory_offset > 0 else str(int(trajectory_offset))
-    screen.blit(font_med.render(f"LOFT: {loft_str}°", True, WHITE), (curr_w - 280, 194))
     
-    display_rpm = ball.rpm if ball.is_moving else max(500, int(2000 + (club_idx * 300) + (trajectory_offset * 150)))
-    screen.blit(font_med.render(f"SPIN: {display_rpm} RPM", True, WHITE), (curr_w - 280, 234))
+    # Trackman Data Panel
+    panel_y = 160
+    screen.blit(font_small.render(f"LIE: {ball.lie}%", True, WHITE if ball.lie >= 90 else YELLOW), (curr_w - 280, panel_y))
+    
+    loft_str = f"+{int(trajectory_offset)}" if trajectory_offset > 0 else str(int(trajectory_offset))
+    screen.blit(font_small.render(f"LOFT OFFSET: {loft_str}°", True, WHITE), (curr_w - 280, panel_y + 25))
+    
+    if ball.is_moving:
+        d_loft, l_angle, s_loft, display_rpm = ball.dynamic_loft, ball.launch_angle, ball.spin_loft, ball.rpm
+    else:
+        d_loft, l_angle, s_loft, display_rpm = calculate_trackman_stats(club_idx, trajectory_offset, 1.0)
+        
+    if show_adv_stats:
+        screen.blit(font_small.render(f"DYN LOFT: {d_loft:.1f}°", True, WHITE), (curr_w - 280, panel_y + 50))
+        screen.blit(font_small.render(f"SPIN LOFT: {s_loft:.1f}°", True, WHITE), (curr_w - 280, panel_y + 75))
+        screen.blit(font_small.render(f"LAUNCH ANG: {l_angle:.1f}°", True, WHITE), (curr_w - 280, panel_y + 100))
+        screen.blit(font_small.render(f"SPIN RATE: {display_rpm} RPM", True, WHITE), (curr_w - 280, panel_y + 125))
+        face_str = f"{abs(face_angle):.1f}° {'OPEN' if face_angle > 0 else 'CLOSED' if face_angle < 0 else 'SQUARE'}"
+        screen.blit(font_small.render(f"FACE: {face_str}", True, WHITE), (curr_w - 280, panel_y + 150))
+        compass_y = panel_y + 215
+    else:
+        screen.blit(font_small.render(f"SPIN: {display_rpm} RPM", True, WHITE), (curr_w - 280, panel_y + 50))
+        face_str = f"{abs(face_angle):.1f}° {'OPEN' if face_angle > 0 else 'CLOSED' if face_angle < 0 else 'SQUARE'}"
+        screen.blit(font_small.render(f"FACE: {face_str}", True, WHITE), (curr_w - 280, panel_y + 75))
+        compass_y = panel_y + 140
     
     # Wind Compass
-    cx, cy = curr_w - 80, 310
+    cx, cy = curr_w - 80, compass_y
     pygame.draw.circle(screen, WHITE, (cx, cy), 40, 2)
     mag = math.hypot(wx, wy)
     if mag > 0:
@@ -255,7 +421,7 @@ def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is
         label = font_small.render(f"POWER: {int(power*100)}%", True, WHITE)
         screen.blit(label, (mx + 100, my - 25))
 
-def draw_menus(screen, curr_w, active_menu, show_wind_preview):
+def draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats):
     pygame.draw.rect(screen, (200, 200, 200), (0, 0, curr_w, 24))
     pygame.draw.line(screen, (100, 100, 100), (0, 24), (curr_w, 24))
 
@@ -273,11 +439,13 @@ def draw_menus(screen, curr_w, active_menu, show_wind_preview):
         screen.blit(font_small.render("Restart", True, (0, 0, 0)), (10, 28))
         screen.blit(font_small.render("Quit", True, (0, 0, 0)), (10, 54))
     elif active_menu == "Options":
-        pygame.draw.rect(screen, (220, 220, 220), (60, 24, 200, 60))
-        pygame.draw.rect(screen, (100, 100, 100), (60, 24, 200, 60), 1)
+        pygame.draw.rect(screen, (220, 220, 220), (60, 24, 200, 86))
+        pygame.draw.rect(screen, (100, 100, 100), (60, 24, 200, 86), 1)
         chk = "[X]" if show_wind_preview else "[ ]"
         screen.blit(font_small.render(f"{chk} Wind Preview", True, (0, 0, 0)), (70, 28))
-        screen.blit(font_small.render("    View Scorecard (C)", True, (0, 0, 0)), (70, 54))
+        chk_adv = "[X]" if show_adv_stats else "[ ]"
+        screen.blit(font_small.render(f"{chk_adv} Advanced Stats", True, (0, 0, 0)), (70, 54))
+        screen.blit(font_small.render("    View Scorecard (C)", True, (0, 0, 0)), (70, 80))
 
 def draw_scorecard(screen, curr_w, curr_h, scores, course):
     overlay = pygame.Surface((curr_w, curr_h), pygame.SRCALPHA)
@@ -323,12 +491,29 @@ def draw_scorecard(screen, curr_w, curr_h, scores, course):
 
         for i, s_txt in enumerate(s_row):
             color = HOLE_COLOR
-            if i > 0 and i <= (end_hole - start_hole) and s_txt != "-":
+            is_score = i > 0 and i <= (end_hole - start_hole) and s_txt != "-"
+            if is_score:
                 diff = int(s_txt) - course[start_hole + i - 1]["par"]
                 if diff < 0: color = RED
                 elif diff > 0: color = (0, 0, 200)
+                
             surf = font_small.render(s_txt, True, color)
-            screen.blit(surf, (x + i*col_w + col_w//2 - surf.get_width()//2, y + 6))
+            cx = x + i*col_w + col_w//2
+            cy = y + 6 + surf.get_height()//2
+            
+            if is_score:
+                if diff == -1: # Birdie
+                    pygame.draw.circle(screen, color, (cx, cy), 13, 2)
+                elif diff <= -2: # Eagle or better
+                    pygame.draw.circle(screen, color, (cx, cy), 11, 2)
+                    pygame.draw.circle(screen, color, (cx, cy), 16, 2)
+                elif diff == 1: # Bogey
+                    pygame.draw.rect(screen, color, (cx - 12, cy - 12, 24, 24), 2)
+                elif diff >= 2: # Double Bogey or worse
+                    pygame.draw.rect(screen, color, (cx - 11, cy - 11, 22, 22), 2)
+                    pygame.draw.rect(screen, color, (cx - 16, cy - 16, 32, 32), 2)
+
+            screen.blit(surf, (cx - surf.get_width()//2, y + 6))
             
         for r in range(4): pygame.draw.line(screen, GRAY, (x, y - 60 + r*30), (x + cols*col_w, y - 60 + r*30))
         for c in range(cols + 1): pygame.draw.line(screen, GRAY, (x + c*col_w, y - 60), (x + c*col_w, y + 30))
@@ -386,15 +571,18 @@ def main():
     par = hole_data["par"]
     green_shape = hole_data["green"]
     slope_waves = hole_data["slope_waves"]
+    green_z = hole_data["green_z"]
 
     ball = Ball()
     wx, wy = random.uniform(-difficulty, difficulty), random.uniform(-difficulty, difficulty)
     cam_x, cam_y = 0, -20
-    cam_angle = 0.0
-    aim_angle = 0.0
+    aim_angle = math.degrees(math.atan2(hole_pos[0], hole_pos[1]))
+    cam_angle = aim_angle
     trajectory_offset = 0.0
+    face_angle = 0.0
     show_wind_preview = False
     show_scorecard = False
+    show_adv_stats = True
     club_idx = 0
     state = "3D"
     
@@ -421,8 +609,9 @@ def main():
                     else:
                         running = False
                     handled_menu = True
-                elif active_menu == "Options" and pygame.Rect(60, 24, 200, 60).collidepoint(event.pos):
-                    if event.pos[1] < 54: show_wind_preview = not show_wind_preview
+                elif active_menu == "Options" and pygame.Rect(60, 24, 200, 86).collidepoint(event.pos):
+                    if event.pos[1] < 50: show_wind_preview = not show_wind_preview
+                    elif event.pos[1] < 76: show_adv_stats = not show_adv_stats
                     else: show_scorecard = not show_scorecard
                     handled_menu = True
                 
@@ -442,6 +631,8 @@ def main():
                 if state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0:
                     if event.key == pygame.K_SPACE:
                         ball.chipping = not ball.chipping
+                    if event.key == pygame.K_w: club_idx = (club_idx - 1) % len(CLUBS)
+                    if event.key == pygame.K_s: club_idx = (club_idx + 1) % len(CLUBS)
 
                 if not ball.is_moving and state == "3D":
                     if event.key == pygame.K_w: club_idx = (club_idx - 1) % len(CLUBS)
@@ -454,7 +645,7 @@ def main():
                     effective_power = power * (ball.lie / 100.0)
                     dist = CLUBS[club_idx][1] - (trajectory_offset * 2.5)
                     height = CLUBS[club_idx][2] + (trajectory_offset * 1.5)
-                    ball.start_flight(dist, height, aim_angle, wx, wy, effective_power, trajectory_offset, club_idx)
+                    ball.start_flight(dist, height, aim_angle, wx, wy, effective_power, trajectory_offset, club_idx, face_angle)
                     is_swinging = False; power = 0.0
 
             # Putting Event Handling
@@ -463,12 +654,16 @@ def main():
                     ball.ds = mouse_pos
                     ball.is_dragging = True
                 if event.type == pygame.MOUSEBUTTONUP and ball.is_dragging:
+                    ball.prev_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
+                    ball.prev_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
                     power_mult = ball.lie / 100.0
                     if ball.chipping:
-                        ball.putt_vx = (ball.ds[0] - mouse_pos[0]) * 0.15 * power_mult
-                        ball.putt_vy = (ball.ds[1] - mouse_pos[1]) * 0.15 * power_mult
+                        club_pwr = CLUBS[club_idx][1] / 125.0
+                        club_lft = CLUBS[club_idx][3] / 46.0
+                        ball.putt_vx = (ball.ds[0] - mouse_pos[0]) * 0.15 * power_mult * club_pwr
+                        ball.putt_vy = (ball.ds[1] - mouse_pos[1]) * 0.15 * power_mult * club_pwr
                         drag_dist = math.hypot(ball.ds[0] - mouse_pos[0], ball.ds[1] - mouse_pos[1])
-                        ball.putt_vz = drag_dist * 0.15
+                        ball.putt_vz = drag_dist * 0.15 * club_lft
                     else:
                         ball.putt_vx = (ball.ds[0] - mouse_pos[0]) * 0.12 * power_mult
                         ball.putt_vy = (ball.ds[1] - mouse_pos[1]) * 0.12 * power_mult
@@ -489,10 +684,14 @@ def main():
                     par = hole_data["par"]
                     green_shape = hole_data["green"]
                     slope_waves = hole_data["slope_waves"]
+                    green_z = hole_data["green_z"]
                     ball = Ball()
                     wx, wy = random.uniform(-difficulty, difficulty), random.uniform(-difficulty, difficulty)
                     cam_x, cam_y = 0, -20
-                    cam_angle, aim_angle, trajectory_offset = 0.0, 0.0, 0.0
+                    aim_angle = math.degrees(math.atan2(hole_pos[0], hole_pos[1]))
+                    cam_angle = aim_angle
+                    trajectory_offset = 0.0
+                    face_angle = 0.0
                     state = "3D"
                     is_swinging = False; power = 0.0
 
@@ -501,11 +700,14 @@ def main():
             if power > 1.0: power = 0.0 # Reset on over-swing
 
         keys = pygame.key.get_pressed()
-        if not ball.is_moving and not is_swinging and state == "3D":
-            if keys[pygame.K_LEFT]: aim_angle -= 0.8
-            if keys[pygame.K_RIGHT]: aim_angle += 0.8
+        is_stat_3d = not ball.is_moving and not is_swinging and state == "3D"
+        is_stat_2d = state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0 and not ball.is_dragging
+        
+        if is_stat_3d or (is_stat_2d and ball.chipping):
             if keys[pygame.K_UP]: trajectory_offset += 0.5
             if keys[pygame.K_DOWN]: trajectory_offset -= 0.5
+            if keys[pygame.K_a]: face_angle -= 0.5
+            if keys[pygame.K_d]: face_angle += 0.5
             
             club_name = CLUBS[club_idx][0]
             if club_name == "LW": min_offset = -30.0
@@ -515,6 +717,11 @@ def main():
             else: min_offset = -15.0
             
             trajectory_offset = max(min_offset, min(15.0, trajectory_offset))
+            face_angle = max(-15.0, min(15.0, face_angle))
+            
+        if is_stat_3d:
+            if keys[pygame.K_LEFT]: aim_angle -= 0.8
+            if keys[pygame.K_RIGHT]: aim_angle += 0.8
 
         # --- Game Logic ---
         if state == "3D":
@@ -532,18 +739,18 @@ def main():
                 closest_x = 0
                 closest_w = 30
                 min_dist = 9999
-                for y, x, w in fairway_nodes:
+                for y, x, w, _ in fairway_nodes:
                     if abs(y - ball.y) < min_dist:
                         min_dist = abs(y - ball.y)
                         closest_x = x
                         closest_w = w
                         
-                if abs(ball.x - closest_x) > 80 or ball.y < -50 or ball.y > hole_pos[1] + 50:
+                if abs(ball.x - closest_x) > 120 or ball.y < -50 or ball.y > hole_pos[1] + 150:
                     ball.strokes += 2
                     ball.x, ball.y = ball.prev_x, ball.prev_y
                     msg_text = "OUT OF BOUNDS! +2 STROKES"
                     msg_timer = 180
-                elif math.hypot(ball.x - hole_pos[0], ball.y - hole_pos[1]) < 35 or is_on_green(ball.x, ball.y, hole_pos, green_shape):
+                elif is_in_chipping_range(ball.x, ball.y, hole_pos, green_shape, buffer_yards=4):
                     state = "GREEN"
                     ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 28.0
                     ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 28.0
@@ -571,8 +778,9 @@ def main():
                 if ball.putt_z <= 0:
                     ball.putt_z = 0
                     ball.putt_vz = 0
-                    ball.putt_vx *= 0.4
-                    ball.putt_vy *= 0.4
+                    roll_factor = max(0.1, 0.4 + (1.0 - (CLUBS[club_idx][3] / 46.0)) * 0.6) if ball.chipping else 0.4
+                    ball.putt_vx *= roll_factor
+                    ball.putt_vy *= roll_factor
             else:
                 ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
                 
@@ -580,7 +788,7 @@ def main():
                 sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
                 
                 if is_on_green(sim_x, sim_y, hole_pos, green_shape):
-                    sx, sy = get_slope(sim_x, sim_y, slope_waves)
+                    sx, sy = get_slope(sim_x, sim_y, slope_waves, hole_pos)
                     ball.putt_vx += sx * 2.8
                     ball.putt_vy += sy * 2.8
                     ball.putt_vx *= 0.97
@@ -594,6 +802,53 @@ def main():
             
             is_moving_2d = abs(ball.putt_vx) >= 0.06 or abs(ball.putt_vy) >= 0.06 or ball.putt_z > 0
             
+            if ball.putt_x < 0 or ball.putt_x > curr_w or ball.putt_y < 0 or ball.putt_y > curr_h:
+                while abs(ball.putt_vx) >= 0.06 or abs(ball.putt_vy) >= 0.06 or ball.putt_z > 0:
+                    if ball.putt_z > 0 or ball.putt_vz != 0:
+                        ball.putt_x += ball.putt_vx
+                        ball.putt_y += ball.putt_vy
+                        ball.putt_z += ball.putt_vz
+                        ball.putt_vz -= 2.3
+                        if ball.putt_z <= 0:
+                            ball.putt_z = 0; ball.putt_vz = 0
+                            roll_factor = max(0.1, 0.4 + (1.0 - (CLUBS[club_idx][3] / 46.0)) * 0.6) if ball.chipping else 0.4
+                            ball.putt_vx *= roll_factor; ball.putt_vy *= roll_factor
+                    else:
+                        ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
+                        sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
+                        sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
+                        if is_on_green(sim_x, sim_y, hole_pos, green_shape):
+                            sx, sy = get_slope(sim_x, sim_y, slope_waves, hole_pos)
+                            ball.putt_vx += sx * 2.8; ball.putt_vy += sy * 2.8
+                            ball.putt_vx *= 0.97; ball.putt_vy *= 0.97
+                            if math.hypot(ball.putt_vx, ball.putt_vy) < 0.7 and math.hypot(sx, sy) < 0.02:
+                                ball.putt_vx *= 0.5; ball.putt_vy *= 0.5
+                        else:
+                            ball.putt_vx *= 0.7; ball.putt_vy *= 0.7
+                state = "3D"
+                ball.is_moving = False
+                ball.x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
+                ball.y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
+                ball.z = 0
+                ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                closest_x = 0; closest_w = 30; min_dist = 9999
+                for y, x, w, _ in fairway_nodes:
+                    if abs(y - ball.y) < min_dist:
+                        min_dist = abs(y - ball.y)
+                        closest_x = x; closest_w = w
+                if abs(ball.x - closest_x) > 120 or ball.y < -50 or ball.y > hole_pos[1] + 150:
+                    ball.x, ball.y = ball.prev_x, ball.prev_y
+                    msg_text = "OUT OF BOUNDS! +2 STROKES"
+                    msg_timer = 180
+                    ball.strokes += 2
+                else:
+                    ball.lie = 100 if abs(ball.x - closest_x) <= closest_w else random.randint(20, 100)
+                ball.chipping = False
+                aim_angle = math.degrees(math.atan2(hole_pos[0] - ball.x, hole_pos[1] - ball.y))
+                cam_angle = aim_angle
+                is_moving_2d = False
+                was_moving_2d = False
+
             if not is_moving_2d and was_moving_2d:
                 ball.putt_vx = ball.putt_vy = ball.putt_z = 0
                 sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
@@ -630,16 +885,83 @@ def main():
 
         # --- Rendering ---
         if state == "3D":
-            pygame.draw.rect(screen, BROWN, (0, int(curr_h*0.38), curr_w, curr_h))
+            # Infinite Rough background (prevents polygon near-plane stretching entirely)
+            pygame.draw.rect(screen, ROUGH, (0, int(curr_h*0.38), curr_w, curr_h))
+
+            # --- Panorama (Skyline & Lake) ---
+            horizon = int(curr_h * 0.38)
+            fov = 75.0 # View angle width in degrees
+            deg_to_px = curr_w / fov
+            pano_w = int(360 * deg_to_px)
+            ca = cam_angle % 360
+            offset_x = - (ca * deg_to_px) + (curr_w / 2)
+
+            # Draw Lake Michigan (from 0 to 180 degrees)
+            lake_h = max(5, int(curr_h * 0.015))
+            for shift in [0, pano_w, -pano_w]:
+                rx = offset_x + shift
+                lx = int(rx)
+                lw = int(180 * deg_to_px)
+                if lx + lw > 0 and lx < curr_w:
+                    pygame.draw.rect(screen, (40, 100, 160), (lx, horizon - lake_h, lw, lake_h))
+                    pygame.draw.line(screen, (194, 178, 128), (lx, horizon), (lx + lw, horizon), 2)
             
-            rough_nodes = [(yrd, 0, 250) for yrd in range(-100, int(hole_pos[1] + 100), 50)]
-            for i in range(len(rough_nodes)-1):
-                y1, x1, w1 = rough_nodes[i]; y2, x2, w2 = rough_nodes[i+1]
+            # Draw Skyline (angles 190 to 350)
+            for b in SKYLINE:
+                x1 = b[0] * deg_to_px
+                w_px = max(2, int(b[1] * deg_to_px))
+                h_px = int(b[2] * (curr_h / 720.0)) # scale height relative to base window size
+                
+                for shift in [0, pano_w, -pano_w]:
+                    rx = offset_x + x1 + shift
+                    if rx + w_px > 0 and rx < curr_w:
+                        pygame.draw.rect(screen, b[3], (int(rx), horizon - h_px, w_px, h_px))
+                        if len(b) > 4:
+                            if b[4] == "SEARS":
+                                pygame.draw.line(screen, (0,0,0), (int(rx + w_px*0.25), horizon - h_px), (int(rx + w_px*0.25), horizon - h_px - 35), 2)
+                                pygame.draw.line(screen, (0,0,0), (int(rx + w_px*0.75), horizon - h_px), (int(rx + w_px*0.75), horizon - h_px - 35), 2)
+                            elif b[4] == "HANCOCK":
+                                pygame.draw.line(screen, (0,0,0), (int(rx + w_px*0.35), horizon - h_px), (int(rx + w_px*0.35), horizon - h_px - 25), 2)
+                                pygame.draw.line(screen, (0,0,0), (int(rx + w_px*0.65), horizon - h_px), (int(rx + w_px*0.65), horizon - h_px - 25), 2)
+                                pygame.draw.line(screen, (10,10,10), (int(rx), horizon - h_px), (int(rx + w_px), horizon - h_px + 40), 1)
+                                pygame.draw.line(screen, (10,10,10), (int(rx + w_px), horizon - h_px), (int(rx), horizon - h_px + 40), 1)
+
+            # --- OB Stakes (White Posts) ---
+            for i, node in enumerate(fairway_nodes):
+                if i % 2 == 0:  # Every 40 yards
+                    y, x, w, _ = node
+                    for sx in [x - 120, x + 120]:
+                        base = project(sx, y, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        if base and base[3] > -14:
+                            top = project(sx, y, 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                            if top:
+                                pygame.draw.line(screen, WHITE, base[:2], top[:2], max(1, int(2.5*base[2])))
+            
+            # OB Stakes behind Green
+            for sx in range(int(hole_pos[0]) - 80, int(hole_pos[0]) + 81, 20):
+                base = project(sx, hole_pos[1] + 150, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if base and base[3] > -14:
+                    top = project(sx, hole_pos[1] + 150, 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    if top:
+                        pygame.draw.line(screen, WHITE, base[:2], top[:2], max(1, int(2.5*base[2])))
+                        
+            # OB Stakes behind Tee
+            for sx in range(-80, 81, 20):
+                base = project(sx, -50, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if base and base[3] > -14:
+                    top = project(sx, -50, 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    if top:
+                        pygame.draw.line(screen, WHITE, base[:2], top[:2], max(1, int(2.5*base[2])))
+
+            for i in range(len(fairway_nodes)-1):
+                y1, x1, w1, _ = fairway_nodes[i]; y2, x2, w2, _ = fairway_nodes[i+1]
                 p1l = project(x1-w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 p1r = project(x1+w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 p2l = project(x2-w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 p2r = project(x2+w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                if p1l and p2l: pygame.draw.polygon(screen, ROUGH, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
+                if p1l and p1r and p2l and p2r:
+                    if p1l[3] > -14 or p2l[3] > -14 or p1r[3] > -14 or p2r[3] > -14:
+                        pygame.draw.polygon(screen, FAIRWAY, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
 
             # --- Tee Box ---
             tb_p1l = project(-12, -10, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
@@ -647,24 +969,18 @@ def main():
             tb_p2l = project(-12, 8, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
             tb_p2r = project(12, 8, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
             if tb_p1l and tb_p1r and tb_p2l and tb_p2r:
-                pygame.draw.polygon(screen, GREEN_COLOR, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]])
-                pygame.draw.polygon(screen, WHITE, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]], 1)
-                tm1 = project(-4, 0, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                tm2 = project(4, 0, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                if tm1: 
-                    pygame.draw.circle(screen, RED, tm1[:2], max(1, int(0.2*tm1[2])))
-                    pygame.draw.circle(screen, WHITE, tm1[:2], max(1, int(0.2*tm1[2])), 1)
-                if tm2: 
-                    pygame.draw.circle(screen, RED, tm2[:2], max(1, int(0.2*tm2[2])))
-                    pygame.draw.circle(screen, WHITE, tm2[:2], max(1, int(0.2*tm2[2])), 1)
-
-            for i in range(len(fairway_nodes)-1):
-                y1, x1, w1 = fairway_nodes[i]; y2, x2, w2 = fairway_nodes[i+1]
-                p1l = project(x1-w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p1r = project(x1+w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p2l = project(x2-w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p2r = project(x2+w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                if p1l and p2l: pygame.draw.polygon(screen, FAIRWAY, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
+                if tb_p1l[3] > -14 or tb_p2l[3] > -14 or tb_p1r[3] > -14 or tb_p2r[3] > -14:
+                    pygame.draw.polygon(screen, GREEN_COLOR, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]])
+                    pygame.draw.polygon(screen, WHITE, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]], 1)
+                
+            tm1 = project(-4, 0, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tm2 = project(4, 0, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            if tm1 and tm1[3] > -14: 
+                pygame.draw.circle(screen, RED, tm1[:2], max(1, int(0.2*tm1[2])))
+                pygame.draw.circle(screen, WHITE, tm1[:2], max(1, int(0.2*tm1[2])), 1)
+            if tm2 and tm2[3] > -14: 
+                pygame.draw.circle(screen, RED, tm2[:2], max(1, int(0.2*tm2[2])))
+                pygame.draw.circle(screen, WHITE, tm2[:2], max(1, int(0.2*tm2[2])), 1)
 
             # Draw Green shape (matches 2D view)
             green1_pts = []
@@ -675,14 +991,14 @@ def main():
             for a in range(0, 360, 10):
                 rad = math.radians(a)
                 gp1 = project(hole_pos[0] + math.cos(rad)*g1_w, hole_pos[1] + math.sin(rad)*g1_h, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                if gp1: green1_pts.append(gp1[:2])
+                if gp1: green1_pts.append(gp1)
                 gp2 = project(hole_pos[0] + ox + math.cos(rad)*g2_w, hole_pos[1] + oy + math.sin(rad)*g2_h, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                if gp2: green2_pts.append(gp2[:2])
-            if len(green1_pts) > 2: pygame.draw.polygon(screen, GREEN_COLOR, green1_pts)
-            if len(green2_pts) > 2: pygame.draw.polygon(screen, GREEN_COLOR, green2_pts)
+                if gp2: green2_pts.append(gp2)
+            if len(green1_pts) > 2 and any(pt[3] > -14 for pt in green1_pts): pygame.draw.polygon(screen, GREEN_COLOR, [pt[:2] for pt in green1_pts])
+            if len(green2_pts) > 2 and any(pt[3] > -14 for pt in green2_pts): pygame.draw.polygon(screen, GREEN_COLOR, [pt[:2] for pt in green2_pts])
 
             f = project(hole_pos[0], hole_pos[1], 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            if f:
+            if f and f[3] > -14:
                 pygame.draw.line(screen, WHITE, (f[0], f[1]), (f[0], f[1]-max(1, int(12*f[2]))), 2)
                 pygame.draw.rect(screen, RED, (f[0], f[1]-max(1, int(12*f[2])), max(1, int(4*f[2])), max(1, int(3*f[2]))))
             
@@ -698,7 +1014,7 @@ def main():
                 neck = project(px, py, 4.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 head = project(px, py, 5.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 
-                if head and waist and feet_l and feet_r and neck:
+                if head and waist and feet_l and feet_r and neck and waist[3] > -14:
                     PLAYER_COLOR = (200, 220, 255)
                     pygame.draw.line(screen, (50, 50, 50), waist[:2], feet_l[:2], 2)
                     pygame.draw.line(screen, (50, 50, 50), waist[:2], feet_r[:2], 2)
@@ -733,26 +1049,45 @@ def main():
                         pygame.draw.ellipse(screen, (100, 100, 100), club_rect)
 
             b = project(ball.x, ball.y, ball.z, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            if b: pygame.draw.circle(screen, WHITE, (b[0], b[1]), max(1, int(0.15*b[2])))
+            if b and b[3] > -14: pygame.draw.circle(screen, WHITE, (b[0], b[1]), max(1, int(0.15*b[2])))
 
             # --- Aim Indicator ---
             if not ball.is_moving:
                 lie_mult = ball.lie / 100.0
                 adj_dist = (CLUBS[club_idx][1] - (trajectory_offset * 2.5)) * lie_mult
                 adj_height = (CLUBS[club_idx][2] + (trajectory_offset * 1.5)) * lie_mult
-                base_target_x = ball.x + adj_dist * math.sin(math.radians(aim_angle))
-                base_target_y = ball.y + adj_dist * math.cos(math.radians(aim_angle))
+                
+                # Predict RPM for the shot
+                _, _, _, preview_rpm = calculate_trackman_stats(club_idx, trajectory_offset, lie_mult)
+                start_angle = aim_angle + (face_angle * 0.85)
+                spin_axis = face_angle * 4.0
+                
+                # Apply Aerodynamic Wind & Spin to the preview
+                adj_dist, adj_height, lat_wx, lat_wy = apply_wind_physics(adj_dist, adj_height, start_angle, wx, wy, preview_rpm)
+                
+                spin_eff = math.cos(math.radians(spin_axis))
+                adj_dist *= max(0.7, spin_eff)
+                
+                base_target_x = ball.x + adj_dist * math.sin(math.radians(start_angle))
+                base_target_y = ball.y + adj_dist * math.cos(math.radians(start_angle))
                 
                 arc_points = []
                 sim_x, sim_y = ball.x, ball.y
                 sim_vx = (base_target_x - ball.x) / 100.0
                 sim_vy = (base_target_y - ball.y) / 100.0
-                sim_wx = (wx / 70.0) if show_wind_preview else 0.0
-                sim_wy = (wy / 70.0) if show_wind_preview else 0.0
+                sim_wx = (lat_wx / 60.0) if show_wind_preview else 0.0
+                sim_wy = (lat_wy / 60.0) if show_wind_preview else 0.0
+                
+                sim_cdx = math.cos(math.radians(start_angle))
+                sim_cdy = -math.sin(math.radians(start_angle))
+                sim_caccel = face_angle * 0.001 * (preview_rpm / 2000.0)
                 
                 for step in range(101):
                     t = step / 100.0
-                    pz = 4 * adj_height * t * (1 - t)
+                    pz = ball.z + 4 * adj_height * t * (1 - t)
+                    
+                    sim_vx += sim_cdx * sim_caccel
+                    sim_vy += sim_cdy * sim_caccel
                     
                     alt_wind_mult = pz / 40.0
                     sim_x += sim_vx + (sim_wx * alt_wind_mult)
@@ -760,18 +1095,22 @@ def main():
                     
                     if step % 6 == 0 or step == 100:
                         proj_pt = project(sim_x, sim_y, pz, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                        if proj_pt:
+                        if proj_pt and proj_pt[3] > -14:
                             arc_points.append(proj_pt[:2])
                             
-                t_proj = project(sim_x, sim_y, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                t_proj = project(sim_x, sim_y, get_elevation(sim_x, sim_y, fairway_nodes, green_z), cam_x, cam_y, cam_angle, curr_w, curr_h)
                         
                 if len(arc_points) > 1:
                     pygame.draw.lines(screen, YELLOW, False, arc_points, 1)
 
-                if b and t_proj:
+                if b and t_proj and t_proj[3] > -14:
                     pygame.draw.circle(screen, YELLOW, (t_proj[0], t_proj[1]), max(2, int(15*t_proj[2])), 1)
 
-            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, cam_angle, hole_idx, par)
+            if is_stat_3d:
+                controls_txt = "ARROWS: Aim/Loft  |  A/D: Face Angle  |  W/S: Change Club  |  SPACE: Swing"
+                screen.blit(font_small.render(controls_txt, True, WHITE), (20, curr_h - 30))
+
+            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats)
 
         elif state == "GREEN":
             screen.fill(ROUGH)
@@ -787,7 +1126,7 @@ def main():
                     sim_x = hole_pos[0] + (gx - curr_w//2) / 28.0
                     sim_y = hole_pos[1] - (gy - curr_h//2) / 28.0
                     if is_on_green(sim_x, sim_y, hole_pos, green_shape):
-                        sx, sy = get_slope(sim_x, sim_y, slope_waves)
+                        sx, sy = get_slope(sim_x, sim_y, slope_waves, hole_pos)
                         draw_sx = sx * 4500
                         draw_sy = sy * 4500
                         if abs(draw_sx) > 1 or abs(draw_sy) > 1:
@@ -806,10 +1145,10 @@ def main():
                 pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), 7) # shadow
             pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), 7)
             
-            mode_str = "CHIP" if ball.chipping else "PUTT"
+            mode_str = f"CHIP ({CLUBS[club_idx][0]})" if ball.chipping else "PUTT"
             lie_str = f"Lie: {ball.lie}%"
             color = WHITE if ball.lie >= 90 else YELLOW
-            txt = f"{mode_str} ({lie_str}): Drag BACK to aim. SPACE to toggle."
+            txt = f"{mode_str} - {lie_str} - Drag BACK to aim. SPACE to toggle. W/S to change club."
             screen.blit(font_med.render(txt, True, color), (40, 40))
 
         elif state == "HOLE":
@@ -844,7 +1183,7 @@ def main():
             pygame.draw.rect(screen, HOLE_COLOR, bg_rect, 3, border_radius=8)
             screen.blit(surf, surf.get_rect(center=(curr_w//2, curr_h//2 - 100)))
 
-        draw_menus(screen, curr_w, active_menu, show_wind_preview)
+        draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats)
         
         if show_scorecard:
             draw_scorecard(screen, curr_w, curr_h, scores, COURSE)
