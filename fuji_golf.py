@@ -168,6 +168,7 @@ class Course:
         # Determine expected theme for built-in courses
         expected_theme = None
         if self.name == "Meigs Field Golf Course": expected_theme = "City"
+        elif self.name == "Augusta National": expected_theme = "Augusta"
         elif self.name == "Central Park": expected_theme = "NYC"
         elif self.name == "Augusta Pines": expected_theme = "Forest"
         elif self.name == "Mirage Dunes": expected_theme = "Desert"
@@ -209,8 +210,8 @@ class Course:
     def _generate_skyline(self):
         elements = []
         random.seed(self.seed)
-        
-        themes = ["Desert", "Forest", "NYC", "City"]
+
+        themes = ["Desert", "Forest", "NYC", "City", "Augusta"]
         
         if self.name == "Meigs Field Golf Course":
             self.theme = "City"
@@ -220,6 +221,8 @@ class Course:
             self.theme = "Forest"
         elif self.name == "Mirage Dunes":
             self.theme = "Desert"
+        elif self.name == "Augusta National":
+            self.theme = "Augusta"
         else:
             self.theme = random.choice(themes)
 
@@ -254,9 +257,9 @@ class Course:
                 elements.append(("rect", 180, 4.0, 350, (65, 70, 75), "WTC1"))
                 elements.append(("rect", 185, 4.0, 350, (65, 70, 75), "WTC2"))
             # Add a few extra landmark-sized buildings in other directions
-            elements.append(("rect", 45, 4.5, 300, (45, 50, 55), "TOWER_N"))
-            elements.append(("rect", 135, 5.0, 340, (55, 60, 65), "TOWER_E"))
-            elements.append(("rect", 315, 4.2, 290, (40, 40, 45), "TOWER_W"))
+            elements.append(("rect", 45, 4.5, 300, (45, 50, 55), "TOWER_N")) # Example landmark
+            elements.append(("rect", 135, 5.0, 340, (55, 60, 65), "TOWER_E")) # Example landmark
+            elements.append(("rect", 315, 4.2, 290, (40, 40, 45), "TOWER_W")) # Example landmark
         elif self.theme == "Desert":
             for _ in range(40):
                 color = random.choice([(180, 120, 80), (160, 100, 70), (140, 90, 60)])
@@ -268,7 +271,18 @@ class Course:
             for _ in range(60):
                 color = random.choice([(15, 50, 20), (10, 45, 15)])
                 elements.append(("tree", random.uniform(0, 360), random.uniform(4, 10), random.uniform(100, 180), color))
+        elif self.theme == "Augusta":
+            # Augusta skyline: dense, dark green trees and some distant low hills
+            for _ in range(120):
+                color = random.choice([(20, 60, 25), (15, 50, 20), (25, 65, 30)])
+                elements.append(("tree", random.uniform(0, 360), random.uniform(3, 8), random.uniform(60, 130), color))
+            for _ in range(60):
+                color = random.choice([(15, 50, 20), (10, 45, 15)])
+                elements.append(("tree", random.uniform(0, 360), random.uniform(4, 10), random.uniform(100, 180), color))
                 
+            for _ in range(30): # Distant hills
+                color = random.choice([(80, 90, 80), (70, 80, 70)])
+                elements.append(("mountain", random.uniform(0, 360), random.uniform(10, 30), random.uniform(30, 80), color))
         return elements
 
     def _generate_holes(self):
@@ -286,12 +300,16 @@ class Course:
         
         palettes = {
             "City": [(30, 80, 30), (40, 90, 40), (20, 70, 20)],
-            "NYC": [(30, 80, 30), (40, 90, 40), (20, 70, 20)],
+            "NYC": [(30, 80, 30), (40, 90, 40), (20, 70, 20)], # Green trees in NYC, distinct from city buildings
+            "Augusta": [(10, 50, 15), (8, 45, 12), (12, 55, 18)], # Darker, more solemn greens for Augusta
             "Forest": [(20, 60, 25), (15, 50, 20), (25, 65, 30), (10, 45, 15)],
             "Desert": [(60, 100, 40), (70, 110, 50), (50, 90, 30)]
         }
         palette = palettes.get(self.theme, palettes["City"])
         
+        if self.name == "Augusta National":
+            return self._generate_augusta_holes(palette)
+            
         for i, p in enumerate(pars):
             if p == 3: dist = random.randint(140, 200)
             elif p == 4: dist = random.randint(350, 450)
@@ -343,6 +361,72 @@ class Course:
                 "slope_waves": [
                     (random.uniform(0.005, 0.010), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
                     (random.uniform(0.002, 0.006), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
+                ],
+                "green_z": green_z,
+                "bunkers": bunkers,
+                "water": water_hazards,
+                "trees": trees
+            })
+        return course
+
+    def _generate_augusta_holes(self, palette):
+        course = []
+        random.seed(self.seed)
+        # Augusta National approximate yardages and pars
+        augusta_data = [
+            (4, 445), (5, 575), (4, 350), (3, 240), (4, 495), (3, 180), (4, 450), (5, 570), (4, 460),
+            (4, 495), (4, 520), (3, 155), (5, 510), (4, 440), (5, 550), (3, 170), (4, 440), (4, 465)
+        ]
+        
+        for i, (p, dist) in enumerate(augusta_data):
+            curve_dir = 12 if i % 2 == 0 else -12
+            
+            gw1, gh1 = random.uniform(10, 16), random.uniform(12, 18)
+            gw2, gh2 = random.uniform(12, 18), random.uniform(10, 16)
+            ox, oy = random.uniform(-6, 6), random.uniform(-6, 6)
+            
+            hole_x = math.sin(dist*0.01)*curve_dir
+            
+            fairway = []
+            for y in range(-20, dist+41, 20):
+                z = math.sin(y * 0.02 + i) * 6.0 if p != 3 else 0.0
+                x = math.sin(y*0.01)*curve_dir
+                fairway.append((y, x, random.uniform(25, 35), z))
+                
+            green_z = fairway[-1][3]
+            
+            bunkers = []
+            if i != 13: # Hole 14 is famously the only hole without a single bunker at Augusta
+                bunkers.append((hole_x + random.choice([-15, 15]), dist + random.choice([-10, 10]), random.uniform(5, 9), green_z))
+            if p > 3 and i != 13:
+                fy = dist * random.uniform(0.5, 0.8)
+                fx = math.sin(fy*0.01)*curve_dir + random.choice([-20, 20])
+                fz = math.sin(fy * 0.02 + i) * 6.0
+                bunkers.append((fx, fy, random.uniform(6, 12), fz))
+                
+            water_hazards = []
+            # Augusta iconic water hazards (Amen corner 11, 12, 13 and back-nine stretch 15, 16)
+            if i == 10: water_hazards.append((hole_x - 15, dist - 15, 20))
+            elif i == 11: water_hazards.append((hole_x, dist - 20, 20))
+            elif i == 12: water_hazards.append((hole_x - 15, dist - 15, 15))
+            elif i == 14: water_hazards.append((hole_x, dist - 25, 22))
+            elif i == 15: water_hazards.append((hole_x - 10, dist - 20, 20))
+                
+            trees = []
+            for _ in range(15 + p*6):
+                ty = random.uniform(20, dist + 20)
+                tx = math.sin(ty*0.01)*curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
+                tz = math.sin(ty * 0.02 + i) * 6.0
+                t_color = random.choice(palette)
+                trees.append((tx, ty, tz, random.uniform(25, 60), random.uniform(5, 10), t_color))
+                
+            course.append({
+                "par": p, "hole_pos": (hole_x, dist), 
+                "fairway": fairway,
+                "green": ((gw1, gh1), (gw2, gh2), (ox, oy)),
+                "slope_waves": [ # Augusta greens are notoriously fast and slopey
+                    (random.uniform(0.010, 0.015), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
+                    (random.uniform(0.005, 0.010), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
                 ],
                 "green_z": green_z,
                 "bunkers": bunkers,
@@ -746,7 +830,8 @@ def main():
         ("Meigs Field Golf Course", 312),
         ("Central Park", 212),
         ("Augusta Pines", 123),
-        ("Mirage Dunes", 789)
+        ("Mirage Dunes", 789),
+        ("Augusta National", 1934)
     ]
     course_idx = 0
     
