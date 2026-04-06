@@ -1604,17 +1604,20 @@ def main():
             # --- Draw Peers in 3D ---
             for p_id, p_state in active_peers:
                 if p_state['hole'] == hole_idx and p_state['state'] == "3D":
-                    p_b = project(p_state['x'], p_state['y'], p_state['z'], cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    p_ground_z = get_elevation(p_state['x'], p_state['y'], fairway_nodes, green_z)
+                    p_b = project(p_state['x'], p_state['y'], p_state['z'] + p_ground_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                     if p_b and p_b[3] > -14:
                         pygame.draw.circle(screen, (255, 100, 100), (p_b[0], p_b[1]), max(1, int(0.15*p_b[2])))
                         screen.blit(font_small.render(p_id, True, (255, 150, 150)), (p_b[0] + 10, p_b[1] - 10))
 
-            b = project(ball.x, ball.y, ball.z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            b_ground_z = get_elevation(ball.x, ball.y, fairway_nodes, green_z)
+            b = project(ball.x, ball.y, ball.z + b_ground_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
             if b and b[3] > -14: pygame.draw.circle(screen, WHITE, (b[0], b[1]), max(1, int(0.15*b[2])))
             
             # --- Draw Particles (3D) ---
             for p in particles:
-                p_proj = project(p['x'], p['y'], p['z'], cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p_ground_z = get_elevation(p['x'], p['y'], fairway_nodes, green_z)
+                p_proj = project(p['x'], p['y'], p['z'] + p_ground_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 if p_proj and p_proj[3] > -14:
                     pygame.draw.circle(screen, p['color'], p_proj[:2], max(1, int(0.1*p_proj[2])))
 
@@ -1661,7 +1664,8 @@ def main():
                     sim_y += sim_vy + (sim_wy * alt_wind_mult)
                     
                     if step % 6 == 0 or step == 100:
-                        proj_pt = project(sim_x, sim_y, pz, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        sim_ground_z = get_elevation(sim_x, sim_y, fairway_nodes, green_z)
+                        proj_pt = project(sim_x, sim_y, pz + sim_ground_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                         if proj_pt and proj_pt[3] > -14:
                             arc_points.append(proj_pt[:2])
                             
