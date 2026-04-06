@@ -306,6 +306,42 @@ class Course:
             "Desert": [(60, 100, 40), (70, 110, 50), (50, 90, 30)]
         }
         palette = palettes.get(self.theme, palettes["City"])
+
+    def _get_augusta_elevation(self, i, y, dist, p):
+        pct = max(0.0, min(1.0, y / dist))
+        
+        # Dramatic, real-world elevation changes for Augusta (in yards)
+        if i == 0: z = pct * 15.0
+        elif i == 1: z = -pct * 30.0 # Hole 2: Pink Dogwood downhill
+        elif i == 2: z = pct * 10.0
+        elif i == 3: z = -pct * 15.0
+        elif i == 4: z = pct * 20.0
+        elif i == 5: z = -pct * 25.0
+        elif i == 6: z = pct * 10.0
+        elif i == 7: z = pct * 25.0
+        elif i == 8: z = -math.sin(pct * 3.14) * 15.0 + (pct * 5.0) # Hole 9: Severely rolling
+        elif i == 9: z = -pct * 35.0 # Hole 10: Massive drop
+        elif i == 10: z = -pct * 20.0
+        elif i == 11: z = 0.0
+        elif i == 12: z = -pct * 15.0 + math.sin(pct * 15.0) * 4.0 # Hole 13: Downhill, rolling
+        elif i == 13: z = pct * 15.0
+        elif i == 14: z = -pct * 20.0
+        elif i == 15: z = -pct * 10.0
+        elif i == 16: z = pct * 15.0
+        elif i == 17: z = pct * 35.0 # Hole 18: Steeply uphill
+        else: z = 0.0
+
+        if p != 3: z += math.sin(y * 0.03 + i) * 2.5
+            
+        # Cross-slope factor (positive = slopes right, negative = slopes left)
+        cs = 0.0
+        if i == 12: cs = -0.25     # Hole 13 (Azalea) slopes severely right to left
+        elif i == 9: cs = -0.15    # Hole 10 (Camellia) tilts right to left
+        elif i == 1: cs = -0.10    # Hole 2 tilts right to left
+        elif i == 8: cs = 0.20     # Hole 9 tilts left to right
+        else: cs = math.sin(y * 0.01 + i) * 0.08
+            
+        return z, cs
         
         if self.name == "Augusta National":
             return self._generate_augusta_holes(palette)
@@ -325,8 +361,9 @@ class Course:
             fairway = []
             for y in range(-20, dist+41, 20):
                 z = math.sin(y * 0.02 + i) * 6.0 if p != 3 else 0.0
+                cs = math.sin(y * 0.01 + i) * 0.1 if p != 3 else 0.0
                 x = math.sin(y*0.01)*curve_dir
-                fairway.append((y, x, random.uniform(25, 35), z))
+                fairway.append((y, x, random.uniform(25, 35), z, cs))
                 
             green_z = fairway[-1][3]
             
@@ -389,11 +426,11 @@ class Course:
             
             fairway = []
             for y in range(-20, dist+41, 20):
-                z = math.sin(y * 0.02 + i) * 6.0 if p != 3 else 0.0
+                z, cs = self._get_augusta_elevation(i, y, dist, p)
                 x = math.sin(y*0.01)*curve_dir
-                fairway.append((y, x, random.uniform(25, 35), z))
+                fairway.append((y, x, random.uniform(25, 35), z, cs))
                 
-            green_z = fairway[-1][3]
+            green_z, _ = self._get_augusta_elevation(i, dist, dist, p)
             
             bunkers = []
             if i != 13: # Hole 14 is famously the only hole without a single bunker at Augusta
@@ -401,11 +438,11 @@ class Course:
             if p > 3 and i != 13:
                 fy = dist * random.uniform(0.5, 0.8)
                 fx = math.sin(fy*0.01)*curve_dir + random.choice([-20, 20])
-                fz = math.sin(fy * 0.02 + i) * 6.0
+                fz, fcs = self._get_augusta_elevation(i, fy, dist, p)
+                fz += fcs * (fx - math.sin(fy*0.01)*curve_dir)
                 bunkers.append((fx, fy, random.uniform(6, 12), fz))
                 
             water_hazards = []
-            # Augusta iconic water hazards (Amen corner 11, 12, 13 and back-nine stretch 15, 16)
             if i == 10: water_hazards.append((hole_x - 15, dist - 15, 20))
             elif i == 11: water_hazards.append((hole_x, dist - 20, 20))
             elif i == 12: water_hazards.append((hole_x - 15, dist - 15, 15))
@@ -416,7 +453,8 @@ class Course:
             for _ in range(15 + p*6):
                 ty = random.uniform(20, dist + 20)
                 tx = math.sin(ty*0.01)*curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
-                tz = math.sin(ty * 0.02 + i) * 6.0
+                tz, tcs = self._get_augusta_elevation(i, ty, dist, p)
+                tz += tcs * (tx - math.sin(ty*0.01)*curve_dir)
                 t_color = random.choice(palette)
                 trees.append((tx, ty, tz, random.uniform(25, 60), random.uniform(5, 10), t_color))
                 
@@ -437,12 +475,21 @@ class Course:
 
 def get_elevation(x, y, fairway_nodes, green_z):
     if not fairway_nodes: return 0.0
-    if y <= fairway_nodes[0][0]: return fairway_nodes[0][3]
+    if y <= fairway_nodes[0][0]:
+        node = fairway_nodes[0]
+        cs = node[4] if len(node) > 4 else 0.0
+        return node[3] + cs * (x - node[1])
     if y >= fairway_nodes[-1][0]: return green_z
     for i in range(len(fairway_nodes)-1):
         if fairway_nodes[i][0] <= y <= fairway_nodes[i+1][0]:
-            t = (y - fairway_nodes[i][0]) / (fairway_nodes[i+1][0] - fairway_nodes[i][0])
-            return fairway_nodes[i][3] + t * (fairway_nodes[i+1][3] - fairway_nodes[i][3])
+            node1, node2 = fairway_nodes[i], fairway_nodes[i+1]
+            t = (y - node1[0]) / (node2[0] - node1[0])
+            
+            cs1 = node1[4] if len(node1) > 4 else 0.0
+            z1 = node1[3] + cs1 * (x - node1[1])
+            cs2 = node2[4] if len(node2) > 4 else 0.0
+            z2 = node2[3] + cs2 * (x - node2[1])
+            return z1 + t * (z2 - z1)
     return 0.0
 
 def get_slope(x, y, waves, hole_pos):
@@ -517,7 +564,7 @@ class Ball:
         self.curve_accel_y = 0.0
         self.hit_tree = False
 
-    def start_flight(self, dist, height, angle, wx, wy, power_mult, loft_offset, club_idx, face_angle):
+    def start_flight(self, dist, height, angle, wx, wy, power_mult, loft_offset, club_idx, face_angle, fairway_nodes, green_z):
         self.prev_x, self.prev_y = self.x, self.y
         self.is_moving = True
         self.flight_progress = 0
@@ -542,6 +589,16 @@ class Ball:
         
         # Apply Aerodynamic Wind & Spin calculations
         adj_dist, adj_height, lat_wx, lat_wy = apply_wind_physics(actual_dist, base_height, start_angle, wx, wy, self.rpm)
+        
+        # Adjust for elevation difference (Uphill plays longer, downhill plays shorter)
+        start_elev = get_elevation(self.x, self.y, fairway_nodes, green_z)
+        target_x_est = self.x + adj_dist * math.sin(math.radians(start_angle))
+        target_y_est = self.y + adj_dist * math.cos(math.radians(start_angle))
+        target_elev = get_elevation(target_x_est, target_y_est, fairway_nodes, green_z)
+        elev_diff = target_elev - start_elev
+        
+        adj_dist -= elev_diff * 1.0 # ~1 yard adjustment per 1 yard of elevation
+        adj_dist = max(0.1, adj_dist)
         
         self.dist = adj_dist
         self.height = adj_height
@@ -1073,7 +1130,7 @@ def main():
                                 'color': random.choice([(210, 180, 140), (190, 160, 120), (220, 190, 150)])
                             })
                             
-                    ball.start_flight(dist, height, aim_angle, wx, wy, effective_power, trajectory_offset, club_idx, face_angle)
+                    ball.start_flight(dist, height, aim_angle, wx, wy, effective_power, trajectory_offset, club_idx, face_angle, fairway_nodes, green_z)
                     is_swinging = False; power = 0.0
 
             # Putting Event Handling
@@ -1509,36 +1566,45 @@ def main():
             # --- OB Stakes (White Posts) ---
             for i, node in enumerate(fairway_nodes):
                 if i % 2 == 0:  # Every 40 yards
-                    y, x, w, _ = node
+                    y, x, w = node[0], node[1], node[2]
                     for sx in [x - 120, x + 120]:
-                        base = project(sx, y, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        stake_z = get_elevation(sx, y, fairway_nodes, green_z)
+                        base = project(sx, y, stake_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                         if base and base[3] > -14:
-                            top = project(sx, y, 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                            top = project(sx, y, stake_z + 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
                             if top:
                                 pygame.draw.line(screen, WHITE, base[:2], top[:2], max(1, int(2.5*base[2])))
             
             # OB Stakes behind Green
             for sx in range(int(hole_pos[0]) - 80, int(hole_pos[0]) + 81, 20):
-                base = project(sx, hole_pos[1] + 150, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                stake_z = get_elevation(sx, hole_pos[1] + 150, fairway_nodes, green_z)
+                base = project(sx, hole_pos[1] + 150, stake_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 if base and base[3] > -14:
-                    top = project(sx, hole_pos[1] + 150, 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    top = project(sx, hole_pos[1] + 150, stake_z + 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
                     if top:
                         pygame.draw.line(screen, WHITE, base[:2], top[:2], max(1, int(2.5*base[2])))
                         
             # OB Stakes behind Tee
             for sx in range(-80, 81, 20):
-                base = project(sx, -50, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                stake_z = get_elevation(sx, -50, fairway_nodes, green_z)
+                base = project(sx, -50, stake_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 if base and base[3] > -14:
-                    top = project(sx, -50, 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    top = project(sx, -50, stake_z + 1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
                     if top:
                         pygame.draw.line(screen, WHITE, base[:2], top[:2], max(1, int(2.5*base[2])))
 
             for i in range(len(fairway_nodes)-1):
-                y1, x1, w1, _ = fairway_nodes[i]; y2, x2, w2, _ = fairway_nodes[i+1]
-                p1l = project(x1-w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p1r = project(x1+w1, y1, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p2l = project(x2-w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p2r = project(x2+w2, y2, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                node1 = fairway_nodes[i]
+                node2 = fairway_nodes[i+1]
+                y1, x1, w1, z1 = node1[:4]
+                cs1 = node1[4] if len(node1) > 4 else 0.0
+                y2, x2, w2, z2 = node2[:4]
+                cs2 = node2[4] if len(node2) > 4 else 0.0
+                
+                p1l = project(x1-w1, y1, z1 - cs1*w1, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p1r = project(x1+w1, y1, z1 + cs1*w1, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p2l = project(x2-w2, y2, z2 - cs2*w2, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                p2r = project(x2+w2, y2, z2 + cs2*w2, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 if p1l and p1r and p2l and p2r:
                     if p1l[3] > -14 or p2l[3] > -14 or p1r[3] > -14 or p2r[3] > -14:
                         pygame.draw.polygon(screen, FAIRWAY, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
@@ -1568,17 +1634,20 @@ def main():
                     pygame.draw.polygon(screen, (200, 200, 255), [pt[:2] for pt in w_pts], max(1, int(w_pts[0][2])))
 
             # --- Tee Box ---
-            tb_p1l = project(-12, -10, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            tb_p1r = project(12, -10, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            tb_p2l = project(-12, 8, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            tb_p2r = project(12, 8, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tb_z1 = get_elevation(0, -10, fairway_nodes, green_z)
+            tb_z2 = get_elevation(0, 8, fairway_nodes, green_z)
+            tb_p1l = project(-12, -10, tb_z1, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tb_p1r = project(12, -10, tb_z1, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tb_p2l = project(-12, 8, tb_z2, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tb_p2r = project(12, 8, tb_z2, cam_x, cam_y, cam_angle, curr_w, curr_h)
             if tb_p1l and tb_p1r and tb_p2l and tb_p2r:
                 if tb_p1l[3] > -14 or tb_p2l[3] > -14 or tb_p1r[3] > -14 or tb_p2r[3] > -14:
                     pygame.draw.polygon(screen, GREEN_COLOR, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]])
                     pygame.draw.polygon(screen, WHITE, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]], 1)
                 
-            tm1 = project(-4, 0, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            tm2 = project(4, 0, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tm_z = get_elevation(0, 0, fairway_nodes, green_z)
+            tm1 = project(-4, 0, tm_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            tm2 = project(4, 0, tm_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
             if tm1 and tm1[3] > -14: 
                 pygame.draw.circle(screen, RED, tm1[:2], max(1, int(0.2*tm1[2])))
                 pygame.draw.circle(screen, WHITE, tm1[:2], max(1, int(0.2*tm1[2])), 1)
@@ -1594,14 +1663,14 @@ def main():
             ox, oy = green_shape[2]
             for a in range(0, 360, 10):
                 rad = math.radians(a)
-                gp1 = project(hole_pos[0] + math.cos(rad)*g1_w, hole_pos[1] + math.sin(rad)*g1_h, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                gp1 = project(hole_pos[0] + math.cos(rad)*g1_w, hole_pos[1] + math.sin(rad)*g1_h, green_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 if gp1: green1_pts.append(gp1)
-                gp2 = project(hole_pos[0] + ox + math.cos(rad)*g2_w, hole_pos[1] + oy + math.sin(rad)*g2_h, 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                gp2 = project(hole_pos[0] + ox + math.cos(rad)*g2_w, hole_pos[1] + oy + math.sin(rad)*g2_h, green_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 if gp2: green2_pts.append(gp2)
             if len(green1_pts) > 2 and any(pt[3] > -14 for pt in green1_pts): pygame.draw.polygon(screen, GREEN_COLOR, [pt[:2] for pt in green1_pts])
             if len(green2_pts) > 2 and any(pt[3] > -14 for pt in green2_pts): pygame.draw.polygon(screen, GREEN_COLOR, [pt[:2] for pt in green2_pts])
 
-            f = project(hole_pos[0], hole_pos[1], 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+            f = project(hole_pos[0], hole_pos[1], green_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
             if f and f[3] > -14:
                 pygame.draw.line(screen, WHITE, (f[0], f[1]), (f[0], f[1]-max(1, int(12*f[2]))), 2)
                 pygame.draw.rect(screen, RED, (f[0], f[1]-max(1, int(12*f[2])), max(1, int(4*f[2])), max(1, int(3*f[2]))))
@@ -1645,12 +1714,13 @@ def main():
                 p_angle = math.radians(aim_angle - 90)
                 px = ball.x + 2.5 * math.sin(p_angle)
                 py = ball.y + 2.5 * math.cos(p_angle)
+                p_z = get_elevation(px, py, fairway_nodes, green_z)
                 
-                feet_l = project(px - 1.0*math.cos(p_angle), py + 1.0*math.sin(p_angle), 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                feet_r = project(px + 1.0*math.cos(p_angle), py - 1.0*math.sin(p_angle), 0, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                waist = project(px, py, 2.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                neck = project(px, py, 4.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                head = project(px, py, 5.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                feet_l = project(px - 1.0*math.cos(p_angle), py + 1.0*math.sin(p_angle), p_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                feet_r = project(px + 1.0*math.cos(p_angle), py - 1.0*math.sin(p_angle), p_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                waist = project(px, py, p_z + 2.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                neck = project(px, py, p_z + 4.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                head = project(px, py, p_z + 5.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 
                 if head and waist and feet_l and feet_r and neck and waist[3] > -14:
                     PLAYER_COLOR = (200, 220, 255)
@@ -1663,16 +1733,16 @@ def main():
                         swing_rot = math.radians(aim_angle + 160 * power)
                         club_x = px + 3.5 * math.sin(swing_rot)
                         club_y = py + 3.5 * math.cos(swing_rot)
-                        club_z = 6 * power
+                        club_z = p_z + 6 * power
                         hands_x = px + 1.5 * math.sin(swing_rot)
                         hands_y = py + 1.5 * math.cos(swing_rot)
-                        hands_z = 2.5 + 2 * power
+                        hands_z = p_z + 2.5 + 2 * power
                     else:
-                        club_x, club_y, club_z = ball.x, ball.y, 0
+                        club_x, club_y, club_z = ball.x, ball.y, get_elevation(ball.x, ball.y, fairway_nodes, green_z)
                         aim_rad = math.radians(aim_angle)
                         hands_x = px + 1.5 * math.sin(aim_rad)
                         hands_y = py + 1.5 * math.cos(aim_rad)
-                        hands_z = 2.0
+                        hands_z = p_z + 2.0
 
                     hands = project(hands_x, hands_y, hands_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                     club_head = project(club_x, club_y, club_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
@@ -1722,6 +1792,15 @@ def main():
                 
                 spin_eff = math.cos(math.radians(spin_axis))
                 adj_dist *= max(0.7, spin_eff)
+                
+                # Adjust for Elevation Predictively
+                start_elev = get_elevation(ball.x, ball.y, fairway_nodes, green_z)
+                target_x_est = ball.x + adj_dist * math.sin(math.radians(start_angle))
+                target_y_est = ball.y + adj_dist * math.cos(math.radians(start_angle))
+                target_elev = get_elevation(target_x_est, target_y_est, fairway_nodes, green_z)
+                elev_diff = target_elev - start_elev
+                adj_dist -= elev_diff * 1.0
+                adj_dist = max(0.1, adj_dist)
                 
                 base_target_x = ball.x + adj_dist * math.sin(math.radians(start_angle))
                 base_target_y = ball.y + adj_dist * math.cos(math.radians(start_angle))
