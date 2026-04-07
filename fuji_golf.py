@@ -53,6 +53,9 @@ CLUBS = [
     ["SW", 95, 100, 54.0], ["LW", 75, 110, 60.0]
 ]
 
+PPU = 16.0 # Pixels Per Yard for 2D View
+cam_z_global = 0.0
+
 # --- P2P Networking (IPv6 + Mesh Gossip Discovery) ---
 class P2PNetwork:
     def __init__(self, port=50505, player_id=None):
@@ -167,11 +170,11 @@ class Course:
         
         # Determine expected theme for built-in courses
         expected_theme = None
-        if self.name == "Meigs Field Golf Course": expected_theme = "City"
-        elif self.name == "Augusta National": expected_theme = "Augusta"
-        elif self.name == "Central Park": expected_theme = "NYC"
-        elif self.name == "Augusta Pines": expected_theme = "Forest"
-        elif self.name == "Mirage Dunes": expected_theme = "Desert"
+        if self.name.startswith("Meigs Field"): expected_theme = "City"
+        elif self.name.startswith("Augusta National"): expected_theme = "Augusta"
+        elif self.name.startswith("Central Park"): expected_theme = "NYC"
+        elif self.name.startswith("Augusta Pines"): expected_theme = "Forest"
+        elif self.name.startswith("Mirage Dunes"): expected_theme = "Desert"
         
         loaded_from_json = False
         # Attempt to load from JSON first
@@ -213,15 +216,15 @@ class Course:
 
         themes = ["Desert", "Forest", "NYC", "City", "Augusta"]
         
-        if self.name == "Meigs Field Golf Course":
+        if self.name.startswith("Meigs Field"):
             self.theme = "City"
-        elif self.name == "Central Park":
+        elif self.name.startswith("Central Park"):
             self.theme = "NYC"
-        elif self.name == "Augusta Pines":
+        elif self.name.startswith("Augusta Pines"):
             self.theme = "Forest"
-        elif self.name == "Mirage Dunes":
+        elif self.name.startswith("Mirage Dunes"):
             self.theme = "Desert"
-        elif self.name == "Augusta National":
+        elif self.name.startswith("Augusta National"):
             self.theme = "Augusta"
         else:
             self.theme = random.choice(themes)
@@ -233,7 +236,7 @@ class Course:
             for _ in range(50):
                 color = random.choice([(40,40,40), (30,35,40), (20,25,30), (50,50,60)])
                 elements.append(("rect", random.uniform(190, 350), random.uniform(1.5, 4.0), random.uniform(50, 150), color))
-            if self.name == "Meigs Field Golf Course":
+            if self.name.startswith("Meigs Field"):
                 elements.append(("rect", 270, 4.5, 260, (15, 15, 15), "SEARS"))
                 elements.append(("rect", 300, 3.5, 230, (25, 25, 25), "HANCOCK"))
                 elements.append(("rect", 285, 3.5, 210, (220, 220, 220), "AON"))
@@ -250,7 +253,7 @@ class Course:
             for _ in range(200):
                 color = random.choice([(30,35,40), (20,25,30), (15,20,25)])
                 elements.append(("rect", random.uniform(0, 360), random.uniform(2.5, 6.0), random.uniform(120, 280), color))
-            if self.name == "Central Park":
+            if self.name.startswith("Central Park"):
                 elements.append(("rect", 250, 4.0, 320, (50, 50, 55), "EMPIRE"))
                 elements.append(("rect", 280, 3.0, 280, (70, 75, 80), "CHRYSLER"))
                 # Twin Towers
@@ -306,6 +309,79 @@ class Course:
             "Desert": [(60, 100, 40), (70, 110, 50), (50, 90, 30)]
         }
         palette = palettes.get(self.theme, palettes["City"])
+        
+        if self.name.startswith("Augusta National"):
+            return self._generate_augusta_holes(palette)
+            
+        for i, p in enumerate(pars):
+            if p == 3: dist = random.randint(140, 200)
+            elif p == 4: dist = random.randint(350, 450)
+            else: dist = random.randint(500, 600)
+
+            if self.name.startswith("Meigs Field"):
+                curve_opts = [2, 5, 8]  # Very easy
+            elif self.name.startswith("Mirage Dunes"):
+                curve_opts = [15, 20, 25]  # Medium
+            elif self.name.startswith("Central Park"):
+                curve_opts = [35, 45, 55]  # Hard
+            else:
+                curve_opts = [20, 30, 40]
+                
+            curve_dir = random.choice(curve_opts) if i % 2 == 0 else random.choice([-x for x in curve_opts])
+            
+            gw1, gh1 = random.uniform(12, 16), random.uniform(14, 18)
+            gw2, gh2 = random.uniform(14, 18), random.uniform(12, 16)
+            ox, oy = random.uniform(-6, 6), random.uniform(-6, 6)
+            
+            hole_x = curve_dir
+            
+            fairway = []
+            for y in range(-20, dist+41, 20):
+                z = math.sin(y * 0.02 + i) * 6.0 if p != 3 else 0.0
+                cs = math.sin(y * 0.01 + i) * 0.1 if p != 3 else 0.0
+                x = math.sin(y * 1.5708 / max(1, dist)) * curve_dir
+                fairway.append((y, x, random.uniform(25, 35), z, cs))
+                
+            green_z = fairway[-1][3]
+            
+            bunkers = []
+            # Bunkers guarding the green
+            bunkers.append((hole_x + random.choice([-22, 22]), dist + random.choice([-20, 20]), random.uniform(6, 10), green_z))
+            if p > 3:
+                fy = dist * random.uniform(0.5, 0.8)
+                fx = math.sin(fy * 1.5708 / max(1, dist)) * curve_dir + random.choice([-20, 20])
+                fz = math.sin(fy * 0.02 + i) * 6.0
+                bunkers.append((fx, fy, random.uniform(6, 12), fz))
+                
+            water_hazards = []
+            if random.random() < 0.4:
+                wy = dist * random.uniform(0.3, 0.7)
+                wx = math.sin(wy * 1.5708 / max(1, dist)) * curve_dir + random.choice([-30, 30])
+                wr = random.uniform(15, 35)
+                water_hazards.append((wx, wy, wr))
+                
+            trees = []
+            for _ in range(10 + p*6):
+                ty = random.uniform(20, dist + 20)
+                tx = math.sin(ty * 1.5708 / max(1, dist)) * curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
+                tz = math.sin(ty * 0.02 + i) * 6.0
+                t_color = random.choice(palette)
+                trees.append((tx, ty, tz, random.uniform(20, 50), random.uniform(4, 9), t_color))
+                
+            course.append({
+                "par": p, "hole_pos": (math.sin(dist*0.01)*curve_dir, dist), 
+                "fairway": fairway,
+                "green": ((gw1, gh1), (gw2, gh2), (ox, oy)),
+                "slope_waves": [
+                    (random.uniform(0.005, 0.010), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
+                    (random.uniform(0.002, 0.006), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
+                ],
+                "green_z": green_z,
+                "bunkers": bunkers,
+                "water": water_hazards,
+                "trees": trees
+            })
+        return course
 
     def _get_augusta_elevation(self, i, y, dist, p):
         pct = max(0.0, min(1.0, y / dist))
@@ -331,7 +407,7 @@ class Course:
         elif i == 17: z = pct * 35.0 # Hole 18: Steeply uphill
         else: z = 0.0
 
-        if p != 3: z += math.sin(y * 0.03 + i) * 2.5
+        if p != 3: z += math.sin(y * 0.03 + i) * 4.5
             
         # Cross-slope factor (positive = slopes right, negative = slopes left)
         cs = 0.0
@@ -342,130 +418,97 @@ class Course:
         else: cs = math.sin(y * 0.01 + i) * 0.08
             
         return z, cs
-        
-        if self.name == "Augusta National":
-            return self._generate_augusta_holes(palette)
-            
-        for i, p in enumerate(pars):
-            if p == 3: dist = random.randint(140, 200)
-            elif p == 4: dist = random.randint(350, 450)
-            else: dist = random.randint(500, 600)
-            curve_dir = 12 if i % 2 == 0 else -12
-            
-            gw1, gh1 = random.uniform(10, 16), random.uniform(12, 18)
-            gw2, gh2 = random.uniform(12, 18), random.uniform(10, 16)
-            ox, oy = random.uniform(-6, 6), random.uniform(-6, 6)
-            
-            hole_x = math.sin(dist*0.01)*curve_dir
-            
-            fairway = []
-            for y in range(-20, dist+41, 20):
-                z = math.sin(y * 0.02 + i) * 6.0 if p != 3 else 0.0
-                cs = math.sin(y * 0.01 + i) * 0.1 if p != 3 else 0.0
-                x = math.sin(y*0.01)*curve_dir
-                fairway.append((y, x, random.uniform(25, 35), z, cs))
-                
-            green_z = fairway[-1][3]
-            
-            bunkers = []
-            # Bunkers guarding the green
-            bunkers.append((hole_x + random.choice([-15, 15]), dist + random.choice([-10, 10]), random.uniform(5, 9), green_z))
-            if p > 3:
-                fy = dist * random.uniform(0.5, 0.8)
-                fx = math.sin(fy*0.01)*curve_dir + random.choice([-20, 20])
-                fz = math.sin(fy * 0.02 + i) * 6.0
-                bunkers.append((fx, fy, random.uniform(6, 12), fz))
-                
-            water_hazards = []
-            if random.random() < 0.4:
-                wy = dist * random.uniform(0.3, 0.7)
-                wx = math.sin(wy*0.01)*curve_dir + random.choice([-30, 30])
-                wr = random.uniform(15, 35)
-                water_hazards.append((wx, wy, wr))
-                
-            trees = []
-            for _ in range(10 + p*6):
-                ty = random.uniform(20, dist + 20)
-                tx = math.sin(ty*0.01)*curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
-                tz = math.sin(ty * 0.02 + i) * 6.0
-                t_color = random.choice(palette)
-                trees.append((tx, ty, tz, random.uniform(20, 50), random.uniform(4, 9), t_color))
-                
-            course.append({
-                "par": p, "hole_pos": (math.sin(dist*0.01)*curve_dir, dist), 
-                "fairway": fairway,
-                "green": ((gw1, gh1), (gw2, gh2), (ox, oy)),
-                "slope_waves": [
-                    (random.uniform(0.005, 0.010), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
-                    (random.uniform(0.002, 0.006), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
-                ],
-                "green_z": green_z,
-                "bunkers": bunkers,
-                "water": water_hazards,
-                "trees": trees
-            })
-        return course
 
     def _generate_augusta_holes(self, palette):
         course = []
         random.seed(self.seed)
-        # Augusta National approximate yardages and pars
-        augusta_data = [
-            (4, 445), (5, 575), (4, 350), (3, 240), (4, 495), (3, 180), (4, 450), (5, 570), (4, 460),
-            (4, 495), (4, 520), (3, 155), (5, 510), (4, 440), (5, 550), (3, 170), (4, 440), (4, 465)
-        ]
+        augusta_data = [(4, 445), (5, 575), (4, 350), (3, 240), (4, 495), (3, 180), (4, 450), (5, 570), (4, 460), (4, 495), (4, 520), (3, 155), (5, 510), (4, 440), (5, 550), (3, 170), (4, 440), (4, 465)]
+
+        augusta_curves = {
+            0: 10, 1: -35, 2: -12, 3: 0, 4: -30, 5: 0, 6: 15, 7: 8, 8: -15, 
+            9: -35, 10: 25, 11: 0, 12: -50, 13: -15, 14: 15, 15: 0, 16: 10, 17: 35
+        }
+        
+        # Specific, researched bunker layouts for Augusta National (x_offset_from_hole_center, y_offset_from_green, radius)
+        bunker_layouts = {
+            0: [(-25, 5, 12), (35, 160, 15)],  # 1: Greenside L, Fairway R
+            1: [(-20, -10, 10), (20, -10, 10), (22, 280, 22)], # 2: Greenside front L/R, Fairway R edge
+            2: [(-25, 180, 8), (-15, 170, 9), (-5, 160, 8), (5, 150, 8)], # 3: 4 Fairway bunkers left/middle
+            3: [(-25, -5, 14), (25, 5, 14)], # 4: Two large front/side bunkers
+            4: [(-25, 250, 18), (-25, 220, 18), (-15, -5, 12), (0, -15, 10)], # 5: Deep fairway bunkers left, 2 greenside
+            5: [(-20, 15, 18)], # 6: Large front left bunker
+            6: [(-30, 25, 9), (-25, -25, 9), (0, 30, 9), (25, -25, 9), (35, 20, 9)], # 7: Ring of 5 bunkers, pushed outward
+            7: [(22, 250, 15)], # 8: Fairway bunker on the right
+            8: [(-25, 20, 12), (-25, 0, 12), (25, 5, 10)], # 9: Two front left and right greenside
+            9: [(35, 200, 25)], # 10: Large right fairway bunker
+            11: [(-15, -20, 9), (20, 20, 11)], # 12: Hogan's (front), Nelson's (back right)
+            12: [(-20, 20, 7), (-10, 25, 7), (10, 22, 7), (20, 20, 7)], # 13: Four small bunkers behind green
+            15: [(25, 0, 12), (30, -20, 12), (-30, 5, 12)], # 16: Three bunkers, mostly right, pushed out
+            17: [(-35, 150, 14), (-30, 180, 14), (30, 5, 16)] # 18: Two fairway L, one greenside R
+        }
         
         for i, (p, dist) in enumerate(augusta_data):
-            curve_dir = 12 if i % 2 == 0 else -12
-            
-            gw1, gh1 = random.uniform(10, 16), random.uniform(12, 18)
-            gw2, gh2 = random.uniform(12, 18), random.uniform(10, 16)
+            curve_dir = augusta_curves.get(i, 0)
+            gw1, gh1 = random.uniform(12, 16), random.uniform(14, 18)
+            gw2, gh2 = random.uniform(14, 18), random.uniform(12, 16)
             ox, oy = random.uniform(-6, 6), random.uniform(-6, 6)
             
-            hole_x = math.sin(dist*0.01)*curve_dir
+            slope_waves = [ # Augusta greens are notoriously fast and slopey
+                (random.uniform(0.010, 0.015), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
+                (random.uniform(0.005, 0.010), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
+            ]
             
+            if i == 2: # Hole 3
+                gw1, gh1 = 15, 10
+                gw2, gh2 = 10, 15
+                ox, oy = 0, 8
+                slope_waves = [ # Flattened significantly
+                    (random.uniform(0.001, 0.002), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28))
+                ]
+            elif i == 3: # Hole 4
+                gw1, gh1 = 17, 17
+                gw2, gh2 = 20, 11
+                ox, oy = 0, -10
+                
+            hole_x = curve_dir
             fairway = []
             for y in range(-20, dist+41, 20):
                 z, cs = self._get_augusta_elevation(i, y, dist, p)
-                x = math.sin(y*0.01)*curve_dir
+                x = math.sin(y * 1.5708 / max(1, dist)) * curve_dir
                 fairway.append((y, x, random.uniform(25, 35), z, cs))
-                
             green_z, _ = self._get_augusta_elevation(i, dist, dist, p)
-            
             bunkers = []
-            if i != 13: # Hole 14 is famously the only hole without a single bunker at Augusta
-                bunkers.append((hole_x + random.choice([-15, 15]), dist + random.choice([-10, 10]), random.uniform(5, 9), green_z))
-            if p > 3 and i != 13:
-                fy = dist * random.uniform(0.5, 0.8)
-                fx = math.sin(fy*0.01)*curve_dir + random.choice([-20, 20])
-                fz, fcs = self._get_augusta_elevation(i, fy, dist, p)
-                fz += fcs * (fx - math.sin(fy*0.01)*curve_dir)
-                bunkers.append((fx, fy, random.uniform(6, 12), fz))
-                
+            if i in bunker_layouts:
+                for b_x_off, b_y_off, b_rad in bunker_layouts[i]:
+                    b_y = dist - b_y_off
+                    if b_y_off > 50:
+                        b_x = math.sin(b_y * 1.5708 / max(1, dist)) * curve_dir + b_x_off
+                    else:
+                        b_x = hole_x + b_x_off
+                    b_z, _ = self._get_augusta_elevation(i, b_y, dist, p)
+                    bunkers.append((b_x, b_y, b_rad, b_z))
+            elif i != 13: # Fallback for unlisted holes (except 14)
+                bunkers.append((hole_x + random.choice([-22, 22]), dist + random.choice([-20, 20]), random.uniform(6, 10), green_z))
+
             water_hazards = []
             if i == 10: water_hazards.append((hole_x - 15, dist - 15, 20))
             elif i == 11: water_hazards.append((hole_x, dist - 20, 20))
             elif i == 12: water_hazards.append((hole_x - 15, dist - 15, 15))
             elif i == 14: water_hazards.append((hole_x, dist - 25, 22))
             elif i == 15: water_hazards.append((hole_x - 10, dist - 20, 20))
-                
             trees = []
             for _ in range(15 + p*6):
                 ty = random.uniform(20, dist + 20)
-                tx = math.sin(ty*0.01)*curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
+                tx = math.sin(ty * 1.5708 / max(1, dist)) * curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
                 tz, tcs = self._get_augusta_elevation(i, ty, dist, p)
-                tz += tcs * (tx - math.sin(ty*0.01)*curve_dir)
+                tz += tcs * (tx - math.sin(ty * 1.5708 / max(1, dist)) * curve_dir)
                 t_color = random.choice(palette)
                 trees.append((tx, ty, tz, random.uniform(25, 60), random.uniform(5, 10), t_color))
-                
             course.append({
                 "par": p, "hole_pos": (hole_x, dist), 
                 "fairway": fairway,
                 "green": ((gw1, gh1), (gw2, gh2), (ox, oy)),
-                "slope_waves": [ # Augusta greens are notoriously fast and slopey
-                    (random.uniform(0.010, 0.015), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
-                    (random.uniform(0.005, 0.010), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
-                ],
+                "slope_waves": slope_waves,
                 "green_z": green_z,
                 "bunkers": bunkers,
                 "water": water_hazards,
@@ -491,6 +534,17 @@ def get_elevation(x, y, fairway_nodes, green_z):
             z2 = node2[3] + cs2 * (x - node2[1])
             return z1 + t * (z2 - z1)
     return 0.0
+
+def get_slope_at_point(x, y, fairway_nodes, green_z):
+    h = 0.5 # A slightly larger step is more stable for this terrain
+    z_center = get_elevation(x, y, fairway_nodes, green_z)
+    z_plus_x = get_elevation(x + h, y, fairway_nodes, green_z)
+    z_plus_y = get_elevation(x, y + h, fairway_nodes, green_z)
+    
+    # Gradient points uphill, so slope is the rate of change
+    slope_x = (z_plus_x - z_center) / h
+    slope_y = (z_plus_y - z_center) / h
+    return slope_x, slope_y
 
 def get_slope(x, y, waves, hole_pos):
     sx, sy = 0.0, 0.0
@@ -547,6 +601,8 @@ class Ball:
         self.height = 0
         self.angle = 0
         self.bounce_count = 0
+        self.start_z = 0.0
+        self.elev_diff = 0.0
         
         self.prev_x, self.prev_y = 0, 0
         self.lie = 100
@@ -592,12 +648,13 @@ class Ball:
         
         # Adjust for elevation difference (Uphill plays longer, downhill plays shorter)
         start_elev = get_elevation(self.x, self.y, fairway_nodes, green_z)
+        self.start_z = start_elev
         target_x_est = self.x + adj_dist * math.sin(math.radians(start_angle))
         target_y_est = self.y + adj_dist * math.cos(math.radians(start_angle))
         target_elev = get_elevation(target_x_est, target_y_est, fairway_nodes, green_z)
-        elev_diff = target_elev - start_elev
+        self.elev_diff = target_elev - start_elev
         
-        adj_dist -= elev_diff * 1.0 # ~1 yard adjustment per 1 yard of elevation
+        adj_dist -= self.elev_diff * 1.0 # ~1 yard adjustment per 1 yard of elevation
         adj_dist = max(0.1, adj_dist)
         
         self.dist = adj_dist
@@ -613,11 +670,10 @@ class Ball:
         self.curve_accel_x = math.cos(rad) * face_angle * 0.001 * (self.rpm / 2000.0)
         self.curve_accel_y = -math.sin(rad) * face_angle * 0.001 * (self.rpm / 2000.0)
 
-        # Use purely the lateral wind for crosswind drift over time
         self.wind_x, self.wind_y = lat_wx / 60.0, lat_wy / 60.0
         self.strokes += 1
 
-    def start_bounce(self):
+    def start_bounce(self, fairway_nodes, green_z):
         self.bounce_count += 1
         self.flight_progress = 0
         self.hit_tree = False
@@ -641,35 +697,52 @@ class Ball:
             self.is_moving = False
             self.z = 0
         else:
-            # Maintain the current trajectory vector instead of resetting to aim angle
+            # Dampen velocity first
+            dampened_vx = self.vx * dist_damp * (old_flight_duration / self.flight_duration)
+            dampened_vy = self.vy * dist_damp * (old_flight_duration / self.flight_duration)
+
+            # Hill bounce logic: add a kick based on the slope
+            slope_x, slope_y = get_slope_at_point(self.x, self.y, fairway_nodes, green_z)
+            kick_magnitude = math.hypot(dampened_vx, dampened_vy) * 1.2 # Strong kick downhill
+            
+            self.vx = dampened_vx - slope_x * kick_magnitude
+            self.vy = dampened_vy - slope_y * kick_magnitude
+            
             self.angle = math.degrees(math.atan2(self.vx, self.vy))
-            self.vx = self.vx * dist_damp * (old_flight_duration / self.flight_duration)
-            self.vy = self.vy * dist_damp * (old_flight_duration / self.flight_duration)
             self.max_height = self.height
             self.wind_x *= 0.5
             self.wind_y *= 0.5
             self.curve_accel_x *= 0.3
             self.curve_accel_y *= 0.3
+            
+            self.start_z = get_elevation(self.x, self.y, fairway_nodes, green_z)
+            target_x_est = self.x + self.vx * self.flight_duration
+            target_y_est = self.y + self.vy * self.flight_duration
+            target_elev = get_elevation(target_x_est, target_y_est, fairway_nodes, green_z)
+            self.elev_diff = target_elev - self.start_z
 
-    def update(self):
+    def update(self, fairway_nodes, green_z):
         if self.is_moving:
             self.flight_progress += 1
             t = self.flight_progress / self.flight_duration
-            self.z = 4 * self.max_height * t * (1 - t)
+            absolute_z = self.start_z + 4 * self.max_height * t * (1 - t) + (self.elev_diff * t)
+            current_ground_z = get_elevation(self.x, self.y, fairway_nodes, green_z)
+            self.z = absolute_z - current_ground_z
             
             self.vx += self.curve_accel_x
             self.vy += self.curve_accel_y
             
             # Wind affects the ball more at higher altitudes
-            altitude_wind_mult = self.z / 40.0
+            altitude_wind_mult = max(0, self.z) / 40.0
             self.x += self.vx + (self.wind_x * altitude_wind_mult)
             self.y += self.vy + (self.wind_y * altitude_wind_mult)
             
-            if self.flight_progress >= self.flight_duration:
+            if self.z <= 0 or self.flight_progress >= self.flight_duration:
                 self.z = 0
-                self.start_bounce()
+                self.start_bounce(fairway_nodes, green_z)
 
 def project(obj_x, obj_y, obj_z, cam_x, cam_y, cam_angle, w, h):
+    global cam_z_global
     rel_x = obj_x - cam_x
     rel_y = obj_y - cam_y
     
@@ -689,7 +762,8 @@ def project(obj_x, obj_y, obj_z, cam_x, cam_y, cam_angle, w, h):
     factor = (h * 0.5) / (ry + 15)
     sx = (w // 2) + (rx * factor)
     horizon = h * 0.38
-    sy = horizon + (h - horizon) * (15 / (ry + 15)) - (obj_z * factor)
+    rel_z = obj_z - cam_z_global
+    sy = horizon + (h - horizon) * (15 / (ry + 15)) - (rel_z * factor)
     return int(sx), int(sy), factor, orig_ry
 
 def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats, active_peers, player_id):
@@ -884,7 +958,7 @@ def main():
     input_active = False
     
     course_list = [
-        ("Meigs Field Golf Course", 312),
+        ("Meigs Field Golf Course (Easy)", 312),
         ("Central Park", 212),
         ("Augusta Pines", 123),
         ("Mirage Dunes", 789),
@@ -1253,7 +1327,7 @@ def main():
                 
         if state == "3D":
             was_moving = ball.is_moving
-            ball.update()
+            ball.update(fairway_nodes, green_z)
             
             if ball.is_moving and not ball.hit_tree:
                 for tree_data in trees:
@@ -1297,12 +1371,15 @@ def main():
             cam_x += (target_cam_x - cam_x) * 0.1
             cam_y += (target_cam_y - cam_y) * 0.1
             
+            global cam_z_global
+            cam_z_global = get_elevation(cam_x, cam_y, fairway_nodes, green_z) + 4.5
+            
             if was_moving and not ball.is_moving:
                 # Find nearest fairway node to determine boundaries dynamically
                 closest_x = 0
                 closest_w = 30
                 min_dist = 9999
-                for y, x, w, _ in fairway_nodes:
+                for y, x, w, *_ in fairway_nodes:
                     if abs(y - ball.y) < min_dist:
                         min_dist = abs(y - ball.y)
                         closest_x = x
@@ -1313,10 +1390,10 @@ def main():
                     ball.x, ball.y = ball.prev_x, ball.prev_y
                     msg_text = "OUT OF BOUNDS! +2 STROKES"
                     msg_timer = 180
-                elif is_in_chipping_range(ball.x, ball.y, hole_pos, green_shape, buffer_yards=4):
+                elif is_in_chipping_range(ball.x, ball.y, hole_pos, green_shape, buffer_yards=10):
                     state = "GREEN"
-                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 28.0
-                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 28.0
+                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
                     if is_on_green(ball.x, ball.y, hole_pos, green_shape):
                         ball.lie = 100
                         ball.chipping = False
@@ -1355,8 +1432,8 @@ def main():
             else:
                 ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
                 
-                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
-                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
+                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
+                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
                 
                 if is_on_green(sim_x, sim_y, hole_pos, green_shape):
                     sx, sy = get_slope(sim_x, sim_y, slope_waves, hole_pos)
@@ -1381,8 +1458,8 @@ def main():
                         ball.is_moving = False
                         ball.strokes += 1
                         ball.x, ball.y = ball.prev_x, ball.prev_y
-                        ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * 28.0
-                        ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * 28.0
+                        ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                        ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
                         msg_text = "WATER HAZARD! +1 STROKE"
                         msg_timer = 180
                     else:
@@ -1409,8 +1486,8 @@ def main():
                             ball.putt_vx *= roll_factor; ball.putt_vy *= roll_factor
                     else:
                         ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
-                        sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
-                        sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
+                        sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
+                        sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
                         if is_on_green(sim_x, sim_y, hole_pos, green_shape):
                             sx, sy = get_slope(sim_x, sim_y, slope_waves, hole_pos)
                             ball.putt_vx += sx * 2.8; ball.putt_vy += sy * 2.8
@@ -1440,10 +1517,10 @@ def main():
                     msg_timer = 180
                     ball.x, ball.y = ball.prev_x, ball.prev_y
                 else:
-                    ball.x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
-                    ball.y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
+                    ball.x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
+                    ball.y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
                 closest_x = 0; closest_w = 30; min_dist = 9999
-                for y, x, w, _ in fairway_nodes:
+                for y, x, w, *_ in fairway_nodes:
                     if abs(y - ball.y) < min_dist:
                         min_dist = abs(y - ball.y)
                         closest_x = x; closest_w = w
@@ -1468,8 +1545,8 @@ def main():
 
             if not is_moving_2d and was_moving_2d:
                 ball.putt_vx = ball.putt_vy = ball.putt_z = 0
-                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
-                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
+                sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
+                sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
                 if is_on_green(sim_x, sim_y, hole_pos, green_shape):
                     ball.lie = 100
                     ball.chipping = False
@@ -1816,20 +1893,22 @@ def main():
                 sim_cdy = -math.sin(math.radians(start_angle))
                 sim_caccel = face_angle * 0.001 * (preview_rpm / 2000.0)
                 
+                sim_start_z = get_elevation(ball.x, ball.y, fairway_nodes, green_z)
+                sim_elev_diff = target_elev - sim_start_z
+                
                 for step in range(101):
                     t = step / 100.0
-                    pz = ball.z + 4 * adj_height * t * (1 - t)
+                    absolute_z = sim_start_z + 4 * adj_height * t * (1 - t) + (sim_elev_diff * t)
                     
                     sim_vx += sim_cdx * sim_caccel
                     sim_vy += sim_cdy * sim_caccel
                     
-                    alt_wind_mult = pz / 40.0
+                    alt_wind_mult = max(0, absolute_z - sim_start_z) / 40.0
                     sim_x += sim_vx + (sim_wx * alt_wind_mult)
                     sim_y += sim_vy + (sim_wy * alt_wind_mult)
                     
                     if step % 6 == 0 or step == 100:
-                        sim_ground_z = get_elevation(sim_x, sim_y, fairway_nodes, green_z)
-                        proj_pt = project(sim_x, sim_y, pz + sim_ground_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        proj_pt = project(sim_x, sim_y, absolute_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
                         if proj_pt and proj_pt[3] > -14:
                             arc_points.append(proj_pt[:2])
                             
@@ -1852,18 +1931,21 @@ def main():
             draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats, active_peers, network.player_id)
 
         elif state == "GREEN":
+            hole_radius = max(6, int(curr_h * 0.012))
+            ball_radius = max(3, int(curr_h * 0.006))
+            
             screen.fill(selected_course.rough_color)
             g1_w, g1_h = green_shape[0]
             g2_w, g2_h = green_shape[1]
             ox, oy = green_shape[2]
-            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 - int(g1_w*28), curr_h//2 - int(g1_h*28), int(g1_w*56), int(g1_h*56)))
-            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 + int(ox*28) - int(g2_w*28), curr_h//2 - int(oy*28) - int(g2_h*28), int(g2_w*56), int(g2_h*56)))
+            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 - int(g1_w*PPU), curr_h//2 - int(g1_h*PPU), int(g1_w*PPU*2), int(g1_h*PPU*2)))
+            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(curr_w//2 + int(ox*PPU) - int(g2_w*PPU), curr_h//2 - int(oy*PPU) - int(g2_h*PPU), int(g2_w*PPU*2), int(g2_h*PPU*2)))
             
             # --- Draw Bunkers in 2D ---
             for bx, by, br, bz in bunkers:
-                screen_bx = curr_w//2 + int((bx - hole_pos[0]) * 28)
-                screen_by = curr_h//2 - int((by - hole_pos[1]) * 28)
-                screen_br = int(br * 28)
+                screen_bx = curr_w//2 + int((bx - hole_pos[0]) * PPU)
+                screen_by = curr_h//2 - int((by - hole_pos[1]) * PPU)
+                screen_br = int(br * PPU)
                 
                 if -screen_br < screen_bx < curr_w + screen_br and -screen_br < screen_by < curr_h + screen_br:
                     b_pts = []
@@ -1876,9 +1958,9 @@ def main():
 
             # --- Draw Water Hazards in 2D ---
             for haz_x, haz_y, haz_r in water_hazards:
-                screen_wx = curr_w//2 + int((haz_x - hole_pos[0]) * 28)
-                screen_wy = curr_h//2 - int((haz_y - hole_pos[1]) * 28)
-                screen_wr = int(haz_r * 28)
+                screen_wx = curr_w//2 + int((haz_x - hole_pos[0]) * PPU)
+                screen_wy = curr_h//2 - int((haz_y - hole_pos[1]) * PPU)
+                screen_wr = int(haz_r * PPU)
                 
                 if -screen_wr < screen_wx < curr_w + screen_wr and -screen_wr < screen_wy < curr_h + screen_wr:
                     w_pts = []
@@ -1893,8 +1975,8 @@ def main():
             # Draw slope grid
             for gy in range(curr_h//2 - 900, curr_h//2 + 900, 70):
                 for gx in range(curr_w//2 - 900, curr_w//2 + 900, 70):
-                    sim_x = hole_pos[0] + (gx - curr_w//2) / 28.0
-                    sim_y = hole_pos[1] - (gy - curr_h//2) / 28.0
+                    sim_x = hole_pos[0] + (gx - curr_w//2) / PPU
+                    sim_y = hole_pos[1] - (gy - curr_h//2) / PPU
                     if is_on_green(sim_x, sim_y, hole_pos, green_shape):
                         sx, sy = get_slope(sim_x, sim_y, slope_waves, hole_pos)
                         draw_sx = sx * 4500
@@ -1904,7 +1986,7 @@ def main():
                             pygame.draw.circle(screen, (200, 255, 200), (int(gx + draw_sx), int(gy + draw_sy)), 2)
 
             hole_screen_pos = (curr_w//2, curr_h//2)
-            pygame.draw.circle(screen, HOLE_COLOR, hole_screen_pos, 16)
+            pygame.draw.circle(screen, HOLE_COLOR, hole_screen_pos, hole_radius)
             
             # --- FIXED: Putter Line ---
             if ball.is_dragging:
@@ -1912,22 +1994,22 @@ def main():
                 pygame.draw.line(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), mouse_pos, 2)
 
             if ball.putt_z > 0:
-                pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), 7) # shadow
-            pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), 7)
+                pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), ball_radius) # shadow
+            pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), ball_radius)
             
             # --- Draw Peers in 2D ---
             for p_id, p_state in active_peers:
                 if p_state['hole'] == hole_idx and p_state['state'] == "GREEN":
                     px, py, pz = int(p_state['putt_x']), int(p_state['putt_y']), p_state['putt_z']
-                    if pz > 0: pygame.draw.circle(screen, (0, 0, 0), (px, py), 7)
-                    pygame.draw.circle(screen, (255, 100, 100), (px, int(py - pz)), 7)
+                    if pz > 0: pygame.draw.circle(screen, (0, 0, 0), (px, py), ball_radius)
+                    pygame.draw.circle(screen, (255, 100, 100), (px, int(py - pz)), ball_radius)
                     screen.blit(font_small.render(p_id, True, (255, 150, 150)), (px + 10, py - 20))
             
             # --- Draw Particles (2D) ---
             for p in particles:
-                screen_px = curr_w//2 + int((p['x'] - hole_pos[0]) * 28)
-                screen_py = curr_h//2 - int((p['y'] - hole_pos[1]) * 28)
-                pz_screen = int(p['z'] * 28)
+                screen_px = curr_w//2 + int((p['x'] - hole_pos[0]) * PPU)
+                screen_py = curr_h//2 - int((p['y'] - hole_pos[1]) * PPU)
+                pz_screen = int(p['z'] * PPU)
                 if pz_screen > 0:
                     pygame.draw.circle(screen, p['color'], (screen_px, screen_py - pz_screen), max(1, int(p['life']/10)))
                     
