@@ -5,5 +5,3 @@ build/
 # Ignore everything in the dist directory EXCEPT for .exe files
 dist/*
 !dist/*.exe
-
-courses/
