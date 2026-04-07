@@ -53,7 +53,7 @@ CLUBS = [
     ["SW", 95, 100, 54.0], ["LW", 75, 110, 60.0]
 ]
 
-PPU = 16.0 # Pixels Per Yard for 2D View
+PPU = 28.0 # Pixels Per Yard for 2D View
 cam_z_global = 0.0
 
 # --- P2P Networking (IPv6 + Mesh Gossip Discovery) ---
@@ -346,7 +346,7 @@ class Course:
             
             bunkers = []
             # Bunkers guarding the green
-            bunkers.append((hole_x + random.choice([-22, 22]), dist + random.choice([-20, 20]), random.uniform(6, 10), green_z))
+            bunkers.append((hole_x + random.choice([-28, 28]), dist + random.choice([-26, 26]), random.uniform(6, 10), green_z))
             if p > 3:
                 fy = dist * random.uniform(0.5, 0.8)
                 fx = math.sin(fy * 1.5708 / max(1, dist)) * curve_dir + random.choice([-20, 20])
@@ -358,6 +358,8 @@ class Course:
                 wy = dist * random.uniform(0.3, 0.7)
                 wx = math.sin(wy * 1.5708 / max(1, dist)) * curve_dir + random.choice([-30, 30])
                 wr = random.uniform(15, 35)
+                if dist - wy < wr + 25:
+                    wy = dist - (wr + 25)
                 water_hazards.append((wx, wy, wr))
                 
             trees = []
@@ -431,20 +433,20 @@ class Course:
         
         # Specific, researched bunker layouts for Augusta National (x_offset_from_hole_center, y_offset_from_green, radius)
         bunker_layouts = {
-            0: [(-25, 5, 12), (35, 160, 15)],  # 1: Greenside L, Fairway R
-            1: [(-20, -10, 10), (20, -10, 10), (22, 280, 22)], # 2: Greenside front L/R, Fairway R edge
+            0: [(-32, 8, 12), (35, 160, 15)],  # 1: Greenside L, Fairway R
+            1: [(-28, -14, 10), (28, -14, 10), (22, 280, 22)], # 2: Greenside front L/R, Fairway R edge
             2: [(-25, 180, 8), (-15, 170, 9), (-5, 160, 8), (5, 150, 8)], # 3: 4 Fairway bunkers left/middle
-            3: [(-25, -5, 14), (25, 5, 14)], # 4: Two large front/side bunkers
-            4: [(-25, 250, 18), (-25, 220, 18), (-15, -5, 12), (0, -15, 10)], # 5: Deep fairway bunkers left, 2 greenside
-            5: [(-20, 15, 18)], # 6: Large front left bunker
-            6: [(-30, 25, 9), (-25, -25, 9), (0, 30, 9), (25, -25, 9), (35, 20, 9)], # 7: Ring of 5 bunkers, pushed outward
+            3: [(-32, -10, 14), (32, 10, 14)], # 4: Two large front/side bunkers
+            4: [(-25, 250, 18), (-25, 220, 18), (-22, -8, 12), (0, -26, 10)], # 5: Deep fairway bunkers left, 2 greenside
+            5: [(-28, 22, 18)], # 6: Large front left bunker
+            6: [(-38, 30, 9), (-34, -32, 9), (0, 38, 9), (34, -32, 9), (42, 24, 9)], # 7: Ring of 5 bunkers, pushed outward
             7: [(22, 250, 15)], # 8: Fairway bunker on the right
-            8: [(-25, 20, 12), (-25, 0, 12), (25, 5, 10)], # 9: Two front left and right greenside
+            8: [(-34, 26, 12), (-34, 0, 12), (32, 8, 10)], # 9: Two front left and right greenside
             9: [(35, 200, 25)], # 10: Large right fairway bunker
-            11: [(-15, -20, 9), (20, 20, 11)], # 12: Hogan's (front), Nelson's (back right)
-            12: [(-20, 20, 7), (-10, 25, 7), (10, 22, 7), (20, 20, 7)], # 13: Four small bunkers behind green
-            15: [(25, 0, 12), (30, -20, 12), (-30, 5, 12)], # 16: Three bunkers, mostly right, pushed out
-            17: [(-35, 150, 14), (-30, 180, 14), (30, 5, 16)] # 18: Two fairway L, one greenside R
+            11: [(-22, -26, 9), (28, 24, 11)], # 12: Hogan's (front), Nelson's (back right)
+            12: [(-28, 26, 7), (-14, 32, 7), (14, 28, 7), (28, 26, 7)], # 13: Four small bunkers behind green
+            15: [(32, 0, 12), (38, -26, 12), (-38, 10, 12)], # 16: Three bunkers, mostly right, pushed out
+            17: [(-40, 150, 14), (-36, 180, 14), (36, 8, 16)] # 18: Two fairway L, one greenside R
         }
         
         for i, (p, dist) in enumerate(augusta_data):
@@ -488,14 +490,14 @@ class Course:
                     b_z, _ = self._get_augusta_elevation(i, b_y, dist, p)
                     bunkers.append((b_x, b_y, b_rad, b_z))
             elif i != 13: # Fallback for unlisted holes (except 14)
-                bunkers.append((hole_x + random.choice([-22, 22]), dist + random.choice([-20, 20]), random.uniform(6, 10), green_z))
+                bunkers.append((hole_x + random.choice([-28, 28]), dist + random.choice([-26, 26]), random.uniform(6, 10), green_z))
 
             water_hazards = []
-            if i == 10: water_hazards.append((hole_x - 15, dist - 15, 20))
-            elif i == 11: water_hazards.append((hole_x, dist - 20, 20))
-            elif i == 12: water_hazards.append((hole_x - 15, dist - 15, 15))
-            elif i == 14: water_hazards.append((hole_x, dist - 25, 22))
-            elif i == 15: water_hazards.append((hole_x - 10, dist - 20, 20))
+            if i == 10: water_hazards.append((hole_x - 30, dist - 30, 20))
+            elif i == 11: water_hazards.append((hole_x, dist - 35, 20))
+            elif i == 12: water_hazards.append((hole_x - 30, dist - 30, 15))
+            elif i == 14: water_hazards.append((hole_x, dist - 40, 22))
+            elif i == 15: water_hazards.append((hole_x - 25, dist - 35, 20))
             trees = []
             for _ in range(15 + p*6):
                 ty = random.uniform(20, dist + 20)
@@ -1210,11 +1212,10 @@ def main():
             # Putting Event Handling
             if state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0:
                 if event.type == pygame.MOUSEBUTTONDOWN:
-                    ball.ds = mouse_pos
                     ball.is_dragging = True
                 if event.type == pygame.MOUSEBUTTONUP and ball.is_dragging:
-                    ball.prev_x = hole_pos[0] + (ball.putt_x - curr_w//2) / 28.0
-                    ball.prev_y = hole_pos[1] - (ball.putt_y - curr_h//2) / 28.0
+                    ball.prev_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
+                    ball.prev_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
                     power_mult = ball.lie / 100.0
                     
                     sim_x = ball.prev_x
@@ -1229,16 +1230,22 @@ def main():
                                 'color': random.choice([(210, 180, 140), (190, 160, 120), (220, 190, 150)])
                             })
                             
+                    drag_dx = (ball.putt_x - mouse_pos[0]) / PPU
+                    drag_dy = (ball.putt_y - mouse_pos[1]) / PPU
+                    
+                    mods = pygame.key.get_mods()
+                    power_boost = 3.0 if mods & pygame.KMOD_SHIFT else 1.0
+                    
                     if ball.chipping:
                         club_pwr = CLUBS[club_idx][1] / 125.0
                         club_lft = CLUBS[club_idx][3] / 46.0
-                        ball.putt_vx = (ball.ds[0] - mouse_pos[0]) * 0.15 * power_mult * club_pwr
-                        ball.putt_vy = (ball.ds[1] - mouse_pos[1]) * 0.15 * power_mult * club_pwr
-                        drag_dist = math.hypot(ball.ds[0] - mouse_pos[0], ball.ds[1] - mouse_pos[1])
-                        ball.putt_vz = drag_dist * 0.15 * club_lft
+                        ball.putt_vx = drag_dx * 4.2 * power_mult * club_pwr * power_boost
+                        ball.putt_vy = drag_dy * 4.2 * power_mult * club_pwr * power_boost
+                        drag_dist = math.hypot(drag_dx, drag_dy)
+                        ball.putt_vz = drag_dist * 4.2 * club_lft * power_boost
                     else:
-                        ball.putt_vx = (ball.ds[0] - mouse_pos[0]) * 0.12 * power_mult
-                        ball.putt_vy = (ball.ds[1] - mouse_pos[1]) * 0.12 * power_mult
+                        ball.putt_vx = drag_dx * 3.5 * power_mult * power_boost
+                        ball.putt_vy = drag_dy * 3.5 * power_mult * power_boost
                         ball.putt_vz = 0
                     ball.strokes += 1
                     ball.is_dragging = False
@@ -1391,20 +1398,33 @@ def main():
                     msg_text = "OUT OF BOUNDS! +2 STROKES"
                     msg_timer = 180
                 elif is_in_chipping_range(ball.x, ball.y, hole_pos, green_shape, buffer_yards=10):
-                    state = "GREEN"
-                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
-                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
-                    if is_on_green(ball.x, ball.y, hole_pos, green_shape):
-                        ball.lie = 100
-                        ball.chipping = False
+                    proj_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                    proj_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                    on_green = is_on_green(ball.x, ball.y, hole_pos, green_shape)
+                    margin = 250
+                    if on_green or (margin < proj_x < curr_w - margin and margin < proj_y < curr_h - margin):
+                        state = "GREEN"
+                        ball.putt_x = proj_x
+                        ball.putt_y = proj_y
+                        if on_green:
+                            ball.lie = 100
+                            ball.chipping = False
+                        else:
+                            in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                            if in_bunker:
+                                ball.lie = random.randint(15, 85)
+                                ball.chipping = True
+                            else:
+                                ball.lie = random.randint(30, 90)
+                                ball.chipping = True if ball.lie < 70 else False
                     else:
                         in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
                         if in_bunker:
                             ball.lie = random.randint(15, 85)
-                            ball.chipping = True
+                        elif abs(ball.x - closest_x) <= closest_w:
+                            ball.lie = 100
                         else:
-                            ball.lie = random.randint(30, 90)
-                            ball.chipping = True if ball.lie < 70 else False
+                            ball.lie = random.randint(30, 100)
                 else:
                     in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
                     if in_bunker:
@@ -1990,8 +2010,12 @@ def main():
             
             # --- FIXED: Putter Line ---
             if ball.is_dragging:
-                # Line from ball to mouse (Slingshot)
-                pygame.draw.line(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), mouse_pos, 2)
+                mods = pygame.key.get_mods()
+                power_boost = 3.0 if mods & pygame.KMOD_SHIFT else 1.0
+                line_color = YELLOW if power_boost > 1.0 else WHITE
+                
+                # Line pulling back from the ball (Slingshot to mouse)
+                pygame.draw.line(screen, line_color, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), mouse_pos, 2)
 
             if ball.putt_z > 0:
                 pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), ball_radius) # shadow
@@ -2016,7 +2040,7 @@ def main():
             mode_str = f"CHIP ({CLUBS[club_idx][0]})" if ball.chipping else "PUTT"
             lie_str = f"Lie: {ball.lie}%"
             color = WHITE if ball.lie >= 90 else YELLOW
-            txt = f"{mode_str} - {lie_str} - Drag BACK to aim. SPACE to toggle. W/S to change club."
+            txt = f"{mode_str} - {lie_str} - Drag to aim. SHIFT: Power. SPACE: mode. W/S: club."
             screen.blit(font_med.render(txt, True, color), (40, 40))
 
         elif state == "HOLE":
