@@ -675,25 +675,33 @@ class Ball:
         self.wind_x, self.wind_y = lat_wx / 60.0, lat_wy / 60.0
         self.strokes += 1
 
-    def start_bounce(self, fairway_nodes, green_z):
+    def start_bounce(self, fairway_nodes, green_z, bunkers):
         self.bounce_count += 1
         self.flight_progress = 0
         self.hit_tree = False
         
-        # High RPM reduces forward bounce or causes backspin
-        # Adjusted to be more realistic (max ~4% backspin instead of 15%)
-        spin_effect = (self.rpm - 2500) / 30000.0
-        dist_damp = 0.15 - spin_effect
-        dist_damp = max(-0.04, min(0.25, dist_damp))
+        in_bunker = any(math.hypot(self.x - bx, self.y - by) < br for bx, by, br, _ in bunkers)
         
-        height_damp = 0.2 + (self.loft_offset / 120.0)
-        height_damp = max(0.1, min(0.3, height_damp))
+        if in_bunker:
+            # Sand realistically grabs the ball and kills momentum
+            dist_damp = random.uniform(0.01, 0.04)
+            height_damp = random.uniform(0.02, 0.08)
+            self.rpm = int(self.rpm * 0.1) # Kills spin immediately
+        else:
+            # High RPM reduces forward bounce or causes backspin
+            # Adjusted to be more realistic (max ~4% backspin instead of 15%)
+            spin_effect = (self.rpm - 2500) / 30000.0
+            dist_damp = 0.15 - spin_effect
+            dist_damp = max(-0.04, min(0.25, dist_damp))
+            
+            height_damp = 0.2 + (self.loft_offset / 120.0)
+            height_damp = max(0.1, min(0.3, height_damp))
+            self.rpm = int(self.rpm * 0.5) # Spin decays after hitting the ground
         
         self.dist *= dist_damp
         self.height *= height_damp
         old_flight_duration = self.flight_duration
         self.flight_duration = max(5, int(self.flight_duration * 0.6))
-        self.rpm = int(self.rpm * 0.5) # Spin decays after hitting the ground
         
         if self.flight_duration <= 5 or self.height < 0.5:
             self.is_moving = False
@@ -703,12 +711,17 @@ class Ball:
             dampened_vx = self.vx * dist_damp * (old_flight_duration / self.flight_duration)
             dampened_vy = self.vy * dist_damp * (old_flight_duration / self.flight_duration)
 
-            # Hill bounce logic: add a kick based on the slope
-            slope_x, slope_y = get_slope_at_point(self.x, self.y, fairway_nodes, green_z)
-            kick_magnitude = math.hypot(dampened_vx, dampened_vy) * 1.2 # Strong kick downhill
-            
-            self.vx = dampened_vx - slope_x * kick_magnitude
-            self.vy = dampened_vy - slope_y * kick_magnitude
+            if not in_bunker:
+                # Hill bounce logic: add a kick based on the slope
+                slope_x, slope_y = get_slope_at_point(self.x, self.y, fairway_nodes, green_z)
+                kick_magnitude = math.hypot(dampened_vx, dampened_vy) * 1.2 # Strong kick downhill
+                
+                self.vx = dampened_vx - slope_x * kick_magnitude
+                self.vy = dampened_vy - slope_y * kick_magnitude
+            else:
+                # Bunkers absorb the impact, no slope kick
+                self.vx = dampened_vx
+                self.vy = dampened_vy
             
             self.angle = math.degrees(math.atan2(self.vx, self.vy))
             self.max_height = self.height
@@ -723,7 +736,7 @@ class Ball:
             target_elev = get_elevation(target_x_est, target_y_est, fairway_nodes, green_z)
             self.elev_diff = target_elev - self.start_z
 
-    def update(self, fairway_nodes, green_z):
+    def update(self, fairway_nodes, green_z, bunkers):
         if self.is_moving:
             self.flight_progress += 1
             t = self.flight_progress / self.flight_duration
@@ -741,7 +754,7 @@ class Ball:
             
             if self.z <= 0 or self.flight_progress >= self.flight_duration:
                 self.z = 0
-                self.start_bounce(fairway_nodes, green_z)
+                self.start_bounce(fairway_nodes, green_z, bunkers)
 
 def project(obj_x, obj_y, obj_z, cam_x, cam_y, cam_angle, w, h):
     global cam_z_global
@@ -1334,7 +1347,7 @@ def main():
                 
         if state == "3D":
             was_moving = ball.is_moving
-            ball.update(fairway_nodes, green_z)
+            ball.update(fairway_nodes, green_z, bunkers)
             
             if ball.is_moving and not ball.hit_tree:
                 for tree_data in trees:
@@ -1446,9 +1459,16 @@ def main():
                 if ball.putt_z <= 0:
                     ball.putt_z = 0
                     ball.putt_vz = 0
-                    roll_factor = max(0.1, 0.4 + (1.0 - (CLUBS[club_idx][3] / 46.0)) * 0.6) if ball.chipping else 0.4
-                    ball.putt_vx *= roll_factor
-                    ball.putt_vy *= roll_factor
+                    
+                    sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
+                    sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
+                    if any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers):
+                        ball.putt_vx *= 0.1
+                        ball.putt_vy *= 0.1
+                    else:
+                        roll_factor = max(0.1, 0.4 + (1.0 - (CLUBS[club_idx][3] / 46.0)) * 0.6) if ball.chipping else 0.4
+                        ball.putt_vx *= roll_factor
+                        ball.putt_vy *= roll_factor
             else:
                 ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
                 
@@ -1502,8 +1522,13 @@ def main():
                         ball.putt_vz -= 2.3
                         if ball.putt_z <= 0:
                             ball.putt_z = 0; ball.putt_vz = 0
-                            roll_factor = max(0.1, 0.4 + (1.0 - (CLUBS[club_idx][3] / 46.0)) * 0.6) if ball.chipping else 0.4
-                            ball.putt_vx *= roll_factor; ball.putt_vy *= roll_factor
+                            sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
+                            sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
+                            if any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers):
+                                ball.putt_vx *= 0.1; ball.putt_vy *= 0.1
+                            else:
+                                roll_factor = max(0.1, 0.4 + (1.0 - (CLUBS[club_idx][3] / 46.0)) * 0.6) if ball.chipping else 0.4
+                                ball.putt_vx *= roll_factor; ball.putt_vy *= roll_factor
                     else:
                         ball.putt_x += ball.putt_vx; ball.putt_y += ball.putt_vy
                         sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
