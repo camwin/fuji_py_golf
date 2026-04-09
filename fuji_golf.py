@@ -427,12 +427,12 @@ class Course:
 
         if p != 3: z += math.sin(y * 0.03 + i) * 4.5
             
-        # Cross-slope factor (positive = slopes right, negative = slopes left)
+        # Cross-slope factor (positive = slopes right-to-left, negative = slopes left-to-right)
         cs = 0.0
-        if i == 12: cs = -0.25     # Hole 13 (Azalea) slopes severely right to left
-        elif i == 9: cs = -0.15    # Hole 10 (Camellia) tilts right to left
-        elif i == 1: cs = -0.10    # Hole 2 tilts right to left
-        elif i == 8: cs = 0.20     # Hole 9 tilts left to right
+        if i == 12: cs = 0.30      # Hole 13 (Azalea) slopes severely right to left
+        elif i == 9: cs = 0.15     # Hole 10 (Camellia) tilts right to left
+        elif i == 1: cs = 0.10     # Hole 2 tilts right to left
+        elif i == 8: cs = -0.20    # Hole 9 tilts left to right
         else: cs = math.sin(y * 0.01 + i) * 0.08
             
         return z, cs
@@ -460,7 +460,7 @@ class Course:
             8: [(-34, 26, 12), (-34, 0, 12), (32, 8, 10)], # 9: Two front left and right greenside
             9: [(35, 200, 25)], # 10: Large right fairway bunker
             11: [(0, 18, 10), (12, -14, 4), (20, -14, 4)], # 12: Front center, two back right
-            12: [(-28, 26, 7), (-14, 32, 7), (14, 28, 7), (28, 26, 7)], # 13: Four small bunkers behind green
+            12: [(-28, -10, 7), (-14, -14, 7), (14, -12, 7), (28, -10, 7)], # 13: Four small bunkers behind green
             15: [(32, 0, 12), (38, -26, 12), (-38, 10, 12)], # 16: Three bunkers, mostly right, pushed out
             17: [(-40, 150, 14), (-36, 180, 14), (36, 8, 16)] # 18: Two fairway L, one greenside R
         }
@@ -496,6 +496,9 @@ class Course:
                 ]
                 
             hole_x = curve_dir
+            if i == 12:
+                hole_x = -140
+                
             pin_positions = [
                 (hole_x, dist),
                 (hole_x - gw1*0.5, dist + gh1*0.5),
@@ -506,7 +509,13 @@ class Course:
             fairway = []
             for y in range(-20, dist+81, 20):
                 z, cs = self._get_augusta_elevation(i, y, dist, p)
-                x = math.sin(y * 1.5708 / max(1, dist)) * curve_dir
+                if i == 12:
+                    if y <= 220:
+                        x = 0
+                    else:
+                        x = math.sin((y - 220) * 1.5708 / max(1, dist - 220)) * hole_x
+                else:
+                    x = math.sin(y * 1.5708 / max(1, dist)) * curve_dir
                 fairway.append((y, x, random.uniform(25, 35), z, cs))
             green_z, _ = self._get_augusta_elevation(i, dist, dist, p)
             bunkers = []
@@ -514,7 +523,13 @@ class Course:
                 for b_x_off, b_y_off, b_rad in bunker_layouts[i]:
                     b_y = dist - b_y_off
                     if b_y_off > 50:
-                        b_x = math.sin(b_y * 1.5708 / max(1, dist)) * curve_dir + b_x_off
+                        if i == 12:
+                            if b_y <= 220:
+                                b_x = b_x_off
+                            else:
+                                b_x = math.sin((b_y - 220) * 1.5708 / max(1, dist - 220)) * hole_x + b_x_off
+                        else:
+                            b_x = math.sin(b_y * 1.5708 / max(1, dist)) * curve_dir + b_x_off
                     else:
                         b_x = hole_x + b_x_off
                     b_z, _ = self._get_augusta_elevation(i, b_y, dist, p)
@@ -527,7 +542,13 @@ class Course:
             elif i == 11: 
                 for wx in range(int(hole_x) - 60, int(hole_x) + 60, 8):
                     water_hazards.append((wx, dist - 36, 9))
-            elif i == 12: water_hazards.append((hole_x - 30, dist - 30, 15))
+            elif i == 12: 
+                # Rae's Creek running along the left of the fairway and in front of the green
+                for wy in range(250, int(dist) - 20, 25):
+                    fx = math.sin((wy - 220) * 1.5708 / max(1, dist - 220)) * hole_x
+                    water_hazards.append((fx - 25, wy, 15))
+                for wx in range(int(hole_x) - 40, int(hole_x) + 40, 15):
+                    water_hazards.append((wx, dist - 25, 12))
             elif i == 14: water_hazards.append((hole_x, dist - 40, 22))
             elif i == 15: water_hazards.append((hole_x - 25, dist - 35, 20))
             trees = []
@@ -545,12 +566,31 @@ class Course:
                     az, _ = self._get_augusta_elevation(i, ay, dist, p)
                     color = random.choice([(180, 60, 110), (200, 80, 130), (160, 40, 100), (190, 100, 140)])
                     trees.append((ax, ay, az, random.uniform(1.5, 3.5), random.uniform(2.5, 5), color, "azalea"))
+            elif i == 12:
+                # Azaleas behind the green on 13
+                for _ in range(30):
+                    ay = dist + random.uniform(25, 60)
+                    ax = hole_x + random.uniform(-60, 60)
+                    az, _ = self._get_augusta_elevation(i, ay, dist, p)
+                    color = random.choice([(180, 60, 110), (200, 80, 130), (160, 40, 100), (190, 100, 140)])
+                    trees.append((ax, ay, az, random.uniform(1.0, 2.5), random.uniform(3, 5), color, "azalea"))
 
             for _ in range(15 + p*6):
                 ty = random.uniform(20, dist + 20)
-                tx = math.sin(ty * 1.5708 / max(1, dist)) * curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
-                tz, tcs = self._get_augusta_elevation(i, ty, dist, p)
-                tz += tcs * (tx - math.sin(ty * 1.5708 / max(1, dist)) * curve_dir)
+                if i == 12:
+                    if ty <= 220:
+                        tx = random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
+                        tz, tcs = self._get_augusta_elevation(i, ty, dist, p)
+                        tz += tcs * tx
+                    else:
+                        fx = math.sin((ty - 220) * 1.5708 / max(1, dist - 220)) * hole_x
+                        tx = fx + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
+                        tz, tcs = self._get_augusta_elevation(i, ty, dist, p)
+                        tz += tcs * (tx - fx)
+                else:
+                    tx = math.sin(ty * 1.5708 / max(1, dist)) * curve_dir + random.choice([random.uniform(-60, -30), random.uniform(30, 60)])
+                    tz, tcs = self._get_augusta_elevation(i, ty, dist, p)
+                    tz += tcs * (tx - math.sin(ty * 1.5708 / max(1, dist)) * curve_dir)
                 t_color = random.choice(palette)
                 trees.append((tx, ty, tz, random.uniform(25, 60), random.uniform(5, 10), t_color))
             course.append({
@@ -2140,8 +2180,8 @@ def main():
                         pygame.draw.polygon(screen, (200, 200, 255), w_pts, 2)
 
             # Draw slope grid
-            for gy in range(curr_h//2 - 900, curr_h//2 + 900, 70):
-                for gx in range(curr_w//2 - 900, curr_w//2 + 900, 70):
+            for gy in range(0, curr_h + 70, 70):
+                for gx in range(0, curr_w + 70, 70):
                     sim_x = hole_pos[0] + (gx - curr_w//2) / PPU
                     sim_y = hole_pos[1] - (gy - curr_h//2) / PPU
                     if is_on_green(sim_x, sim_y, green_center, green_shape):
