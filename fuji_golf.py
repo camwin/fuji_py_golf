@@ -417,7 +417,12 @@ class Course:
                 z -= math.sin((y - (dist - 40)) / 25.0 * 3.1415) * 4.0 # Creek dip
             elif y >= dist + 8:
                 z += (y - (dist + 8)) * 0.8 # Steep backstop
-        elif i == 12: z = -pct * 15.0 + math.sin(pct * 15.0) * 4.0 # Hole 13: Downhill, rolling
+        elif i == 12: 
+            z = -pct * 15.0 + math.sin(pct * 15.0) * 4.0 # Hole 13: Downhill, rolling
+            if dist - 50 < y < dist - 10:
+                z -= math.sin((y - (dist - 50)) / 40.0 * 3.1415) * 5.0 # Creek dip
+            if y >= dist + 25:
+                z += (y - (dist + 25)) * 0.8 # Azalea hill behind green
         elif i == 13: z = pct * 15.0
         elif i == 14: z = -pct * 20.0
         elif i == 15: z = -pct * 10.0
@@ -460,7 +465,7 @@ class Course:
             8: [(-34, 26, 12), (-34, 0, 12), (32, 8, 10)], # 9: Two front left and right greenside
             9: [(35, 200, 25)], # 10: Large right fairway bunker
             11: [(0, 18, 10), (12, -14, 4), (20, -14, 4)], # 12: Front center, two back right
-            12: [(-28, -10, 7), (-14, -14, 7), (14, -12, 7), (28, -10, 7)], # 13: Four small bunkers behind green
+            12: [(-28, -28, 7), (-14, -32, 7), (14, -30, 7), (28, -28, 7)], # 13: Four small bunkers behind green
             15: [(32, 0, 12), (38, -26, 12), (-38, 10, 12)], # 16: Three bunkers, mostly right, pushed out
             17: [(-40, 150, 14), (-36, 180, 14), (36, 8, 16)] # 18: Two fairway L, one greenside R
         }
@@ -494,6 +499,10 @@ class Course:
                 slope_waves = [
                     (random.uniform(0.002, 0.005), 0.1, 0.1, 0, 0)
                 ]
+            elif i == 12: # Hole 13
+                gw1, gh1 = 24, 16
+                gw2, gh2 = 20, 14
+                ox, oy = 8, -4
                 
             hole_x = curve_dir
             if i == 12:
@@ -544,11 +553,11 @@ class Course:
                     water_hazards.append((wx, dist - 36, 9))
             elif i == 12: 
                 # Rae's Creek running along the left of the fairway and in front of the green
-                for wy in range(250, int(dist) - 20, 25):
+                for wy in range(250, int(dist) - 30, 25):
                     fx = math.sin((wy - 220) * 1.5708 / max(1, dist - 220)) * hole_x
                     water_hazards.append((fx - 25, wy, 15))
                 for wx in range(int(hole_x) - 40, int(hole_x) + 40, 15):
-                    water_hazards.append((wx, dist - 25, 12))
+                    water_hazards.append((wx, dist - 36, 12))
             elif i == 14: water_hazards.append((hole_x, dist - 40, 22))
             elif i == 15: water_hazards.append((hole_x - 25, dist - 35, 20))
             trees = []
@@ -568,9 +577,9 @@ class Course:
                     trees.append((ax, ay, az, random.uniform(1.5, 3.5), random.uniform(2.5, 5), color, "azalea"))
             elif i == 12:
                 # Azaleas behind the green on 13
-                for _ in range(30):
-                    ay = dist + random.uniform(25, 60)
-                    ax = hole_x + random.uniform(-60, 60)
+                for _ in range(80):
+                    ay = dist + random.uniform(35, 85)
+                    ax = hole_x + random.uniform(-80, 80)
                     az, _ = self._get_augusta_elevation(i, ay, dist, p)
                     color = random.choice([(180, 60, 110), (200, 80, 130), (160, 40, 100), (190, 100, 140)])
                     trees.append((ax, ay, az, random.uniform(1.0, 2.5), random.uniform(3, 5), color, "azalea"))
@@ -1875,7 +1884,7 @@ def main():
                 for a in range(0, 360, 20):
                     rad = math.radians(a)
                     r_dist = haz_r + math.sin(a * 3) * (haz_r * 0.1)
-                    wz = get_elevation(haz_x + math.cos(rad)*r_dist, haz_y + math.sin(rad)*r_dist, fairway_nodes, green_z) - 0.5
+                    wz = get_elevation(haz_x + math.cos(rad)*r_dist, haz_y + math.sin(rad)*r_dist, fairway_nodes, green_z) - 1.2
                     pt = project(haz_x + math.cos(rad)*r_dist, haz_y + math.sin(rad)*r_dist, wz, cam_x, cam_y, cam_angle, curr_w, curr_h)
                     if pt: w_pts.append(pt)
                 if len(w_pts) > 2 and any(pt[3] > -14 for pt in w_pts):
@@ -1945,23 +1954,31 @@ def main():
                         if top and l_bot:
                             trunk_w = max(1, int(tw * 0.3 * base[2]))
                             pygame.draw.line(screen, BROWN, base[:2], l_bot[:2], trunk_w)
-                            r1 = max(2, int(tw * 1.2 * l_bot[2]))
+                            r1 = max(2, int(tw * 1.5 * l_bot[2]))
                             pygame.draw.circle(screen, t_color, l_bot[:2], r1)
-                            mid_y = (top[1] + l_bot[1]) // 2
-                            mid_x = (top[0] + l_bot[0]) // 2
-                            r2 = max(2, int(tw * 0.9 * ((top[2]+l_bot[2])/2)))
-                            c_mid = (min(255, t_color[0]+5), min(255, t_color[1]+20), min(255, t_color[2]+10))
-                            pygame.draw.circle(screen, c_mid, (mid_x, mid_y), r2)
-                            r3 = max(2, int(tw * 0.5 * top[2]))
+                            
+                            # Add an extra circle to fill gaps in taller trees
+                            m1_x, m1_y = int(l_bot[0] * 0.6 + top[0] * 0.4), int(l_bot[1] * 0.6 + top[1] * 0.4)
+                            m2_x, m2_y = int(l_bot[0] * 0.25 + top[0] * 0.75), int(l_bot[1] * 0.25 + top[1] * 0.75)
+                            
+                            r2 = max(2, int(tw * 1.4 * ((top[2]+l_bot[2])/2)))
+                            c_mid1 = (min(255, t_color[0]+2), min(255, t_color[1]+10), min(255, t_color[2]+5))
+                            pygame.draw.circle(screen, c_mid1, (m1_x, m1_y), r2)
+                            
+                            r3 = max(2, int(tw * 1.1 * ((top[2]+l_bot[2])/2)))
+                            c_mid2 = (min(255, t_color[0]+5), min(255, t_color[1]+20), min(255, t_color[2]+10))
+                            pygame.draw.circle(screen, c_mid2, (m2_x, m2_y), r3)
+                            
+                            r4 = max(2, int(tw * 1.0 * top[2]))
                             c_top = (min(255, t_color[0]+10), min(255, t_color[1]+40), min(255, t_color[2]+20))
-                            pygame.draw.circle(screen, c_top, top[:2], r3)
+                            pygame.draw.circle(screen, c_top, top[:2], r4)
                     elif t_type == "azalea":
                         top = project(tx, ty, tz + th, cam_x, cam_y, cam_angle, curr_w, curr_h)
                         if top:
-                            r1 = max(2, int(tw * base[2]))
+                            r1 = max(2, int(tw * 1.3 * base[2]))
                             pygame.draw.circle(screen, t_color, base[:2], r1)
                             c_top = (min(255, t_color[0]+30), min(255, t_color[1]+30), min(255, t_color[2]+30))
-                            pygame.draw.circle(screen, c_top, top[:2], max(2, int(tw * 0.7 * top[2])))
+                            pygame.draw.circle(screen, c_top, top[:2], max(2, int(tw * 1.0 * top[2])))
                     elif t_type == "bridge":
                         rad = math.radians(t_extra if t_extra else 0)
                         dx = math.cos(rad) * tw / 2
