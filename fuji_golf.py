@@ -13,7 +13,7 @@ import uuid
 WIDTH, HEIGHT = 1280, 720 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
-pygame.display.set_caption("Meigs Field Golf Course")
+pygame.display.set_caption("Fuji Py Golf")
 
 def get_resource_path(relative_path):
     try:
@@ -176,36 +176,18 @@ class Course:
         elif self.name.startswith("Augusta Pines"): expected_theme = "Forest"
         elif self.name.startswith("Mirage Dunes"): expected_theme = "Desert"
         
-        loaded_from_json = False
-        # Attempt to load from JSON first
-        json_path = os.path.join(get_resource_path("courses"), f"{name.replace(' ', '_')}.json")
-        if os.path.exists(json_path):
-            with open(json_path, 'r') as f:
-                try:
-                    data = json.load(f)
-                    self.theme = data.get("theme", "City")
-                    if expected_theme and self.theme != expected_theme:
-                        pass # Regenerate if outdated JSON theme doesn't match
-                    else:
-                        if data.get("holes") and "pin_positions" not in data["holes"][0]:
-                            pass # Force regeneration to include the new pin positions update!
-                        self.skyline = data.get("skyline", [])
-                        self.holes = data.get("holes", [])
-                        loaded_from_json = True
-                except Exception:
-                    pass
-                    
-        if not loaded_from_json:
-            self.skyline = self._generate_skyline()
-            self.holes = self._generate_holes()
-            
-            # Auto-export newly generated courses to JSON to allow static editing!
-            try:
-                os.makedirs(get_resource_path("courses"), exist_ok=True)
-                with open(json_path, 'w') as f:
-                    json.dump({"theme": self.theme, "skyline": self.skyline, "holes": self.holes}, f, indent=4)
-            except Exception as e:
-                print(f"Could not save course JSON: {e}")
+        # Always regenerate course on load
+        self.skyline = self._generate_skyline()
+        self.holes = self._generate_holes()
+        
+        # Auto-export newly generated courses to JSON to allow static editing!
+        try:
+            json_path = os.path.join(get_resource_path("courses"), f"{name.replace(' ', '_')}.json")
+            os.makedirs(get_resource_path("courses"), exist_ok=True)
+            with open(json_path, 'w') as f:
+                json.dump({"theme": self.theme, "skyline": self.skyline, "holes": self.holes}, f, indent=4)
+        except Exception as e:
+            print(f"Could not save course JSON: {e}")
                 
         if self.theme == "Desert":
             self.rough_color = (200, 170, 130)  # Sand color
@@ -214,11 +196,16 @@ class Course:
 
     def _generate_skyline(self):
         elements = []
-        random.seed(self.seed)
-
+        if self.name not in ["Putting Green", "Chipping Green", "Driving Range"]:
+            random.seed(self.seed)
+ 
         themes = ["Desert", "Forest", "NYC", "City", "Augusta"]
         
         if self.name.startswith("Meigs Field"):
+            self.theme = "City"
+        elif self.name in ["Putting Green", "Chipping Green"]:
+            self.theme = "Forest"
+        elif self.name == "Driving Range":
             self.theme = "City"
         elif self.name.startswith("Central Park"):
             self.theme = "NYC"
@@ -293,8 +280,94 @@ class Course:
     def _generate_holes(self):
         course = []
         # Generate 18 holes
-        random.seed(self.seed)
-        
+        if self.name not in ["Putting Green", "Chipping Green", "Driving Range"]:
+            random.seed(self.seed)
+
+        if self.name in ["Putting Green", "Chipping Green"]:
+            dist = 50
+            if self.name == "Putting Green":
+                gw1, gh1 = 500, 500
+                gw2, gh2 = 500, 500
+                ox, oy = 0, 0
+                bunkers = []
+                
+                pin_positions = []
+                # One hole in each quadrant, using cartesian coordinates for a square distribution
+                quadrants = [(1, 1), (-1, 1), (-1, -1), (1, -1)] # (sign_x, sign_y)
+                min_dist_from_center = 4
+                max_dist_x = 18
+                max_dist_y = 10
+                for sign_x, sign_y in quadrants:
+                    # Random position within the quadrant's box
+                    px = random.uniform(min_dist_from_center, max_dist_x) * sign_x
+                    py_offset = random.uniform(min_dist_from_center, max_dist_y) * sign_y
+                    py = dist + py_offset
+                    pin_positions.append((px, py))
+                flat_zones = pin_positions
+                
+                slope_waves = [
+                    (random.uniform(0.002, 0.004), random.uniform(0.04, 0.1), random.uniform(0.04, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28)),
+                    (random.uniform(0.001, 0.002), random.uniform(0.1, 0.2), random.uniform(0.1, 0.2), random.uniform(0, 6.28), random.uniform(0, 6.28))
+                ]
+                return [{
+                    "par": 2, "hole_pos": (0, dist),
+                    "pin_positions": pin_positions,
+                    "flat_zones": flat_zones,
+                    "fairway": [(-50, 0, 80, 0, 0), (100, 0, 80, 0, 0)],
+                    "green": ((gw1, gh1), (gw2, gh2), (ox, oy)),
+                    "slope_waves": slope_waves, "green_z": 0.0,
+                    "bunkers": bunkers, "water": [], "trees": []
+                }]
+            else:
+                gw1, gh1 = 20, 20
+                gw2, gh2 = 15, 15
+                ox, oy = 10, 10
+                bunkers = [(-22, 45, 6, 0.0), (-12, 35, 5, 0.0), (18, 65, 5, 0.0)]
+                pin_positions = [
+                    (0, 50),
+                    (-12, 60),
+                    (15, 45),
+                    (8, 65)
+                ]
+                flat_zones = pin_positions
+                slope_waves = [
+                    (random.uniform(0.001, 0.003), random.uniform(0.05, 0.1), random.uniform(0.05, 0.1), random.uniform(0, 6.28), random.uniform(0, 6.28))
+                ]
+                return [{
+                    "par": 1,
+                    "hole_pos": (0, dist),
+                    "pin_positions": pin_positions,
+                    "flat_zones": flat_zones,
+                    "fairway": [(-50, 0, 80, 0, 0), (100, 0, 80, 0, 0)],
+                    "green": ((gw1, gh1), (gw2, gh2), (ox, oy)),
+                    "slope_waves": slope_waves,
+                    "green_z": 0.0,
+                    "bunkers": bunkers,
+                    "water": [],
+                    "trees": []
+                }]
+
+        if self.name == "Driving Range":
+            dist = 400
+            pin_positions = [
+                (-15, 50), (15, 75), (0, 100), 
+                (-30, 150), (30, 200), (-20, 250), (20, 300), (0, 350)
+            ]
+            fairway = [(-50, 0, 100, 0, 0), (450, 0, 100, 0, 0)]
+            trees = []
+            for y in range(-20, 400, 20):
+                trees.append((-90, y, 0, 40, 1.0, (80, 80, 80), "pole"))
+                trees.append((90, y, 0, 40, 1.0, (80, 80, 80), "pole"))
+            return [{
+                "par": 1, "hole_pos": (0, dist),
+                "pin_positions": pin_positions,
+                "fairway": fairway,
+                "green": ((0, 0), (0, 0), (0, 0)),
+                "slope_waves": [], "green_z": 0.0,
+                "bunkers": [], "water": [],
+                "trees": trees
+            }]
+
         pars = [4] * 18
         par3_idx = random.sample(range(18), 4)
         for i in par3_idx: pars[i] = 3
@@ -464,9 +537,10 @@ class Course:
             7: [(22, 250, 15)], # 8: Fairway bunker on the right
             8: [(-34, 26, 12), (-34, 0, 12), (32, 8, 10)], # 9: Two front left and right greenside
             9: [(35, 200, 25)], # 10: Large right fairway bunker
-            11: [(0, 18, 10), (12, -14, 4), (20, -14, 4)], # 12: Front center, two back right
+            10: [(20, -12, 8)], # 11: Back right greenside bunker (tucked tight to lima bean green)
+            11: [(0, 15, 7), (12, -14, 4), (20, -14, 4)], # 12: Front center
             12: [(-28, -28, 7), (-14, -32, 7), (14, -30, 7), (28, -28, 7)], # 13: Four small bunkers behind green
-            15: [(32, 0, 12), (38, -26, 12), (-38, 10, 12)], # 16: Three bunkers, mostly right, pushed out
+            15: [(32, 0, 12), (38, -26, 12), (-42, -5, 10)], # 16: Left bunker pulled back to avoid the pond
             17: [(-40, 150, 14), (-36, 180, 14), (36, 8, 16)] # 18: Two fairway L, one greenside R
         }
         
@@ -648,15 +722,15 @@ def get_slope_at_point(x, y, fairway_nodes, green_z):
     slope_y = (z_plus_y - z_center) / h
     return slope_x, slope_y
 
-def get_slope(x, y, waves, pin_positions):
+def get_slope(x, y, waves, flat_zones):
     sx, sy = 0.0, 0.0
     for amp, fx, fy, px, py in waves:
         sx += math.cos(x * fx + px) * amp
         sy += math.sin(y * fy + py) * amp
         
-    # Flatten the green near ALL pin positions to create flat zones
+    # Flatten the green near specified flat zones
     min_dist = 9999.0
-    for px, py in pin_positions:
+    for px, py in flat_zones:
         dist = math.hypot(x - px, y - py)
         if dist < min_dist:
             min_dist = dist
@@ -886,7 +960,7 @@ def project(obj_x, obj_y, obj_z, cam_x, cam_y, cam_angle, w, h):
     sy = horizon + (h - horizon) * (15 / (ry + 15)) - (rel_z * factor)
     return int(sx), int(sy), factor, orig_ry
 
-def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats, active_peers, player_id):
+def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats, active_peers, player_id, networking_enabled, weather):
     # --- Club Inventory (Left Side) ---
     pygame.draw.rect(screen, (0,0,0,100), (10, 34, 180, 330))
     for i, c in enumerate(CLUBS):
@@ -900,8 +974,9 @@ def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is
     screen.blit(font_med.render(f"{dist} YDS TO PIN", True, WHITE), (curr_w - 280, 74))
     screen.blit(font_med.render(f"STROKES: {ball.strokes}", True, WHITE), (curr_w - 280, 114))
     
-    screen.blit(font_small.render(f"PLAYER ID: {player_id}", True, YELLOW), (curr_w - 280, 150))
-    screen.blit(font_small.render(f"PEERS ONLINE: {len(active_peers)}", True, (255, 150, 150)), (curr_w - 280, 170))
+    if networking_enabled:
+        screen.blit(font_small.render(f"PLAYER ID: {player_id}", True, YELLOW), (curr_w - 280, 150))
+        screen.blit(font_small.render(f"PEERS ONLINE: {len(active_peers)}", True, (255, 150, 150)), (curr_w - 280, 170))
     
     # Trackman Data Panel
     panel_y = 200
@@ -939,7 +1014,11 @@ def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is
         local_wy = wx * math.sin(rad) + wy * math.cos(rad)
         ex, ey = cx + (local_wx/mag)*35, cy - (local_wy/mag)*35
         pygame.draw.line(screen, YELLOW, (cx, cy), (ex, ey), 3)
-    screen.blit(font_small.render(f"WIND: {int(mag)} MPH", True, WHITE), (cx - 55, cy + 50))
+        
+    wind_text = font_small.render(f"WIND: {int(mag)} MPH", True, WHITE)
+    screen.blit(wind_text, (cx - wind_text.get_width()//2, cy + 50))
+    weather_text = font_small.render(f"WEATHER: {weather.upper()}", True, WHITE)
+    screen.blit(weather_text, (cx - weather_text.get_width()//2, cy + 70))
 
     # --- Power Meter (Bottom Center) ---
     if is_swinging or power > 0:
@@ -951,7 +1030,7 @@ def draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is
         label = font_small.render(f"POWER: {int(power*100)}%", True, WHITE)
         screen.blit(label, (mx + 100, my - 25))
 
-def draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats):
+def draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats, networking_enabled):
     pygame.draw.rect(screen, (200, 200, 200), (0, 0, curr_w, 24))
     pygame.draw.line(screen, (100, 100, 100), (0, 24), (curr_w, 24))
 
@@ -973,13 +1052,15 @@ def draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats):
         screen.blit(font_small.render("Restart", True, (0, 0, 0)), (10, 28))
         screen.blit(font_small.render("Quit", True, (0, 0, 0)), (10, 54))
     elif active_menu == "Options":
-        pygame.draw.rect(screen, (220, 220, 220), (60, 24, 200, 86))
-        pygame.draw.rect(screen, (100, 100, 100), (60, 24, 200, 86), 1)
+        pygame.draw.rect(screen, (220, 220, 220), (60, 24, 200, 112))
+        pygame.draw.rect(screen, (100, 100, 100), (60, 24, 200, 112), 1)
         chk = "[X]" if show_wind_preview else "[ ]"
         screen.blit(font_small.render(f"{chk} Wind Preview", True, (0, 0, 0)), (70, 28))
         chk_adv = "[X]" if show_adv_stats else "[ ]"
         screen.blit(font_small.render(f"{chk_adv} Advanced Stats", True, (0, 0, 0)), (70, 54))
-        screen.blit(font_small.render("    View Scorecard (C)", True, (0, 0, 0)), (70, 80))
+        chk_net = "[X]" if networking_enabled else "[ ]"
+        screen.blit(font_small.render(f"{chk_net} P2P Networking", True, (0, 0, 0)), (70, 80))
+        screen.blit(font_small.render("    View Scorecard (C)", True, (0, 0, 0)), (70, 106))
     elif active_menu == "Hole":
         pygame.draw.rect(screen, (220, 220, 220), (160, 24, 160, 86))
         pygame.draw.rect(screen, (100, 100, 100), (160, 24, 160, 86), 1)
@@ -1021,7 +1102,7 @@ def draw_scorecard(screen, curr_w, curr_h, group_scores, course, current_tee_ord
             
         y += 30
         out_par = sum(c["par"] for c in course[start_hole:end_hole])
-        pars = ["PAR"] + [str(course[i]["par"]) for i in range(start_hole, end_hole)] + [str(out_par)]
+        pars = ["PAR"] + [str(course[i]["par"]) if i < len(course) else "-" for i in range(start_hole, end_hole)] + [str(out_par)]
         if label_total2: pars.append(str(sum(c["par"] for c in course)))
         for i, p_txt in enumerate(pars):
             surf = font_small.render(p_txt, True, HOLE_COLOR)
@@ -1043,8 +1124,9 @@ def draw_scorecard(screen, curr_w, curr_h, group_scores, course, current_tee_ord
             for i, s_txt in enumerate(s_row):
                 color = HOLE_COLOR
                 is_score = i > 0 and i <= (end_hole - start_hole) and s_txt != "-"
-                if is_score:
-                    diff = int(s_txt) - course[start_hole + i - 1]["par"]
+                hole_idx_for_par = start_hole + i - 1
+                if is_score and hole_idx_for_par < len(course):
+                    diff = int(s_txt) - course[hole_idx_for_par]["par"]
                     if diff < 0: color = RED
                     elif diff > 0: color = (0, 0, 200)
                     
@@ -1082,12 +1164,15 @@ def draw_scorecard(screen, curr_w, curr_h, group_scores, course, current_tee_ord
     close_txt = font_small.render("Press 'C' to Close Scorecard", True, GRAY)
     screen.blit(close_txt, (curr_w//2 - close_txt.get_width()//2, close_y))
 
-def main():
+def run_game_session():
     difficulty = None
     player_name = ""
     input_active = False
     
     course_list = [
+        ("Putting Green", 999),
+        ("Chipping Green", 888),
+        ("Driving Range", 777),
         ("Meigs Field Golf Course (Easy)", 312),
         ("Central Park", 212),
         ("Augusta Pines", 123),
@@ -1148,7 +1233,7 @@ def main():
             
         pygame.display.flip()
         for e in pygame.event.get():
-            if e.type == pygame.QUIT: pygame.quit(); return
+            if e.type == pygame.QUIT: return False
             if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_1: difficulty = 0
                 if e.key == pygame.K_2: difficulty = 8
@@ -1176,6 +1261,7 @@ def main():
                             difficulty = opt["diff"]
                             
     selected_course = Course(course_list[course_idx][0], course_list[course_idx][1])
+    pygame.display.set_caption(f"Fuji Py Golf - {selected_course.name}")
                         
     network = P2PNetwork(player_id=player_name)
 
@@ -1184,11 +1270,15 @@ def main():
     hole_data = selected_course.holes[hole_idx]
     green_center = hole_data["hole_pos"]
     pin_positions = hole_data.get("pin_positions", [green_center])
+    flat_zones = hole_data.get("flat_zones", pin_positions)
     
     wind_rng = random.Random(312 + hole_idx)
     wx, wy = wind_rng.uniform(-difficulty, difficulty), wind_rng.uniform(-difficulty, difficulty)
-    pin_idx = wind_rng.randint(0, len(pin_positions) - 1)
-    hole_pos = pin_positions[pin_idx]
+    weather = wind_rng.choice(["Clear", "Clear", "Overcast", "Rain"])
+    if selected_course.name == "Putting Green":
+        hole_pos = green_center # Center the view on the green's center
+    else:
+        hole_pos = pin_positions[wind_rng.randint(0, len(pin_positions) - 1)]
     
     fairway_nodes = hole_data["fairway"]
     par = hole_data["par"]
@@ -1198,6 +1288,8 @@ def main():
     bunkers = hole_data["bunkers"]
     water_hazards = hole_data.get("water", [])
     trees = hole_data["trees"]
+
+    practice_balls = []
 
     ball = Ball()
     cam_x, cam_y = 0, -20
@@ -1211,6 +1303,21 @@ def main():
     club_idx = 0
     state = "3D"
     
+    shag_bag_count = 0
+    shag_bag_pos = (0, 0)
+
+    if selected_course.name in ["Putting Green", "Chipping Green"]:
+        if selected_course.name == "Putting Green":
+            state = "GREEN"
+            ball.x = hole_pos[0] + random.uniform(-18, 18)
+            ball.y = hole_pos[1] + random.uniform(-9, 9)
+            ball.lie = 100
+            ball.putt_x = WIDTH // 2 + (ball.x - hole_pos[0]) * PPU
+            ball.putt_y = HEIGHT // 2 + (hole_pos[1] - ball.y) * PPU
+        else:
+            state = "PLACE_BAG"
+    networking_enabled = True
+    
     is_swinging = False
     power = 0.0
     msg_text = ""
@@ -1219,6 +1326,7 @@ def main():
     particles = []
     jump_hole_dir = 0
     take_unplayable = False
+    range_reset_timer = 0
     
     current_tee_order = [network.player_id]
     peer_hole_scores = {}
@@ -1227,23 +1335,41 @@ def main():
     while running:
         curr_w, curr_h = screen.get_size()
         mouse_pos = pygame.mouse.get_pos()
-        screen.fill(SKY)
+        
+        current_time = time.time()
+        wind_mag = math.hypot(wx, wy)
+        
+        if weather == "Clear":
+            sky_col = SKY
+        elif weather == "Overcast":
+            sky_col = (160, 180, 190)
+        elif weather == "Rain":
+            sky_col = (120, 135, 150)
+        else:
+            sky_col = SKY
+        screen.fill(sky_col)
         
         # Update network state
-        my_state = {
-            'hole': hole_idx,
-            'state': state,
-            'strokes': ball.strokes,
-            'x': ball.x,
-            'y': ball.y,
-            'z': ball.z,
-            'putt_x': ball.putt_x,
-            'putt_y': ball.putt_y,
-            'putt_z': ball.putt_z,
-            'scores': scores
-        }
-        network.broadcast_state(my_state)
-        active_peers = network.get_active_peers()
+        if networking_enabled:
+            my_state = {
+                'hole': hole_idx,
+                'state': state,
+                'strokes': ball.strokes,
+                'x': ball.x,
+                'y': ball.y,
+                'z': ball.z,
+                'putt_x': ball.putt_x,
+                'putt_y': ball.putt_y,
+                'putt_z': ball.putt_z,
+                'scores': scores,
+                'practice_balls': practice_balls[-30:]
+            }
+            network.broadcast_state(my_state)
+            active_peers = network.get_active_peers()
+        else:
+            active_peers = []
+            current_tee_order = [network.player_id]
+            peer_hole_scores = {}
 
         # Grouping and Tee Order Tracking
         for p_id, p_state in active_peers:
@@ -1279,13 +1405,14 @@ def main():
                 handled_menu = False
                 if active_menu == "File" and pygame.Rect(0, 24, 120, 60).collidepoint(event.pos):
                     if event.pos[1] < 54:
-                        main(); return
+                        return True
                     else:
-                        running = False
+                        return False
                     handled_menu = True
-                elif active_menu == "Options" and pygame.Rect(60, 24, 200, 86).collidepoint(event.pos):
+                elif active_menu == "Options" and pygame.Rect(60, 24, 200, 112).collidepoint(event.pos):
                     if event.pos[1] < 50: show_wind_preview = not show_wind_preview
                     elif event.pos[1] < 76: show_adv_stats = not show_adv_stats
+                    elif event.pos[1] < 102: networking_enabled = not networking_enabled
                     else: show_scorecard = not show_scorecard
                     handled_menu = True
                 elif active_menu == "Hole" and pygame.Rect(160, 24, 160, 86).collidepoint(event.pos):
@@ -1302,6 +1429,27 @@ def main():
                 else:
                     active_menu = None
                     
+                if not handled_menu and state == "PLACE_BAG":
+                    click_x, click_y = event.pos
+                    world_x = hole_pos[0] + (click_x - curr_w//2) / PPU
+                    world_y = hole_pos[1] - (click_y - curr_h//2) / PPU
+                    
+                    shag_bag_pos = (world_x, world_y)
+                    shag_bag_count = 20
+                    practice_balls.clear()
+                    
+                    ball.x, ball.y = shag_bag_pos
+                    ball.putt_x, ball.putt_y = click_x, click_y
+                    ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                    ball.is_moving = False
+                    ball.is_dragging = False
+                    ball.chipping = True
+                    ball.strokes = 0
+                    in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                    ball.lie = random.randint(15, 85) if in_bunker else random.randint(30, 90)
+                    state = "GREEN"
+                    handled_menu = True
+
                 if handled_menu: continue
 
             if event.type == pygame.KEYDOWN:
@@ -1312,11 +1460,19 @@ def main():
                 if event.key == pygame.K_n: jump_hole_dir = 1
                 if event.key == pygame.K_p: jump_hole_dir = -1
                 if event.key == pygame.K_u: take_unplayable = True
+                if event.key == pygame.K_r: practice_balls.clear()
                 
+                if event.key == pygame.K_b and selected_course.name == "Chipping Green" and state == "GREEN":
+                    state = "PLACE_BAG"
+                    ball.is_moving = False
+                    ball.is_dragging = False
+                    ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                    ball.strokes = 0
+
                 if (not ball.is_moving and not is_swinging and state == "3D") or \
                    (state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0 and not ball.is_dragging and ball.chipping):
-                    if event.key == pygame.K_a: face_angle -= 1.0
-                    if event.key == pygame.K_d: face_angle += 1.0
+                    if event.key == pygame.K_a: face_angle -= 0.25
+                    if event.key == pygame.K_d: face_angle += 0.25
                 
                 if state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0:
                     if event.key == pygame.K_SPACE:
@@ -1328,11 +1484,17 @@ def main():
                     if event.key == pygame.K_w: club_idx = (club_idx - 1) % len(CLUBS)
                     if event.key == pygame.K_s: club_idx = (club_idx + 1) % len(CLUBS)
                     if event.key == pygame.K_SPACE:
-                        if my_turn:
-                            is_swinging = True; power = 0.0
+                        if selected_course.name == "Driving Range" and ball.strokes > 0:
+                            practice_balls.append((ball.x, ball.y, ball.z))
+                            ball.x, ball.y, ball.z = 0, 0, 0
+                            ball.strokes = 0
+                            ball.prev_x, ball.prev_y = 0, 0
                         else:
-                            msg_text = f"WAIT FOR {waiting_on} TO TEE OFF!"
-                            msg_timer = 60
+                            if my_turn:
+                                is_swinging = True; power = 0.0
+                            else:
+                                msg_text = f"WAIT FOR {waiting_on} TO TEE OFF!"
+                                msg_timer = 60
 
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_SPACE and is_swinging:
@@ -1357,6 +1519,7 @@ def main():
             if state == "GREEN" and ball.putt_vx == 0 and ball.putt_vy == 0 and ball.putt_z == 0:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     ball.is_dragging = True
+                    ball.ds = event.pos
                 if event.type == pygame.MOUSEBUTTONUP and ball.is_dragging:
                     ball.prev_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
                     ball.prev_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
@@ -1374,11 +1537,16 @@ def main():
                                 'color': random.choice([(210, 180, 140), (190, 160, 120), (220, 190, 150)])
                             })
                             
-                    drag_dx = (ball.putt_x - mouse_pos[0]) / PPU
-                    drag_dy = (ball.putt_y - mouse_pos[1]) / PPU
+                    drag_dx = (ball.ds[0] - mouse_pos[0]) / PPU
+                    drag_dy = (ball.ds[1] - mouse_pos[1]) / PPU
                     
                     mods = pygame.key.get_mods()
-                    power_boost = 3.0 if mods & pygame.KMOD_SHIFT else 1.0
+                    if mods & pygame.KMOD_SHIFT:
+                        power_boost = 3.0
+                    elif mods & pygame.KMOD_CTRL:
+                        power_boost = 0.3
+                    else:
+                        power_boost = 1.0
                     
                     if ball.chipping:
                         club_pwr = CLUBS[club_idx][1] / 125.0
@@ -1417,14 +1585,15 @@ def main():
                         
                         hole_idx += 1
                         if hole_idx >= len(selected_course.holes):
-                            main() # Restart game if 18 holes are finished
-                            return
+                            return True # Restart game if 18 holes are finished
                         hole_data = selected_course.holes[hole_idx]
                         green_center = hole_data["hole_pos"]
                         pin_positions = hole_data.get("pin_positions", [green_center])
+                        flat_zones = hole_data.get("flat_zones", pin_positions)
                         
                         wind_rng = random.Random(312 + hole_idx)
                         wx, wy = wind_rng.uniform(-difficulty, difficulty), wind_rng.uniform(-difficulty, difficulty)
+                        weather = wind_rng.choice(["Clear", "Clear", "Overcast", "Rain"])
                         pin_idx = wind_rng.randint(0, len(pin_positions) - 1)
                         hole_pos = pin_positions[pin_idx]
                         
@@ -1438,11 +1607,21 @@ def main():
                         trees = hole_data["trees"]
                         ball = Ball()
                         cam_x, cam_y = 0, -20
-                        aim_angle = math.degrees(math.atan2(hole_pos[0], hole_pos[1]))
+                        if selected_course.name == "Driving Range":
+                            aim_angle = 0
+                        else:
+                            aim_angle = math.degrees(math.atan2(hole_pos[0], hole_pos[1]))
                         cam_angle = aim_angle
-                        trajectory_offset = 0.0
-                        face_angle = 0.0
-                        state = "3D"
+                        if selected_course.name in ["Putting Green", "Chipping Green"]:
+                            state = "PLACE_BAG" if selected_course.name == "Chipping Green" else "GREEN"
+                            if state == "GREEN":
+                                ball.x = hole_pos[0] + random.uniform(-18, 18)
+                                ball.y = hole_pos[1] + random.uniform(-9, 9)
+                                ball.lie = 100
+                                ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                                ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                        else:
+                            state = "3D"
                         is_swinging = False; power = 0.0
 
         if is_swinging:
@@ -1468,8 +1647,8 @@ def main():
             face_angle = max(-15.0, min(15.0, face_angle))
             
         if is_stat_3d:
-            if keys[pygame.K_LEFT]: aim_angle -= 0.8
-            if keys[pygame.K_RIGHT]: aim_angle += 0.8
+            if keys[pygame.K_LEFT]: aim_angle -= 0.5
+            if keys[pygame.K_RIGHT]: aim_angle += 0.5
 
         # --- Game Logic ---
         for p in particles[:]:
@@ -1501,6 +1680,18 @@ def main():
                                 ball.flight_progress = ball.flight_duration - ball.flight_progress
                             msg_text = "TREE HIT!"
                             msg_timer = 90
+                            break
+                            
+            if selected_course.name == "Driving Range" and ball.is_moving and 0 < ball.z < 1.0:
+                for px, py in pin_positions:
+                    if py in [50, 75, 100]:
+                        if math.hypot(ball.x - px, ball.y - py) < 1.1:
+                            ball.vx = ball.vy = ball.curve_accel_x = ball.curve_accel_y = 0
+                            ball.is_moving = False
+                            ball.z = 0.5
+                            msg_text = "IN THE BASKET!"
+                            msg_timer = 180
+                            range_reset_timer = 180
                             break
             
             if ball.is_moving and ball.z <= 0.5:
@@ -1541,7 +1732,13 @@ def main():
                         closest_x = x
                         closest_w = w
                         
-                if abs(ball.x - closest_x) > 120 or ball.y < -50 or ball.y > hole_pos[1] + 50:
+                if selected_course.name == "Driving Range":
+                    ball.lie = 100
+                    range_dist = int(math.hypot(ball.x, ball.y))
+                    msg_text = f"SHOT DISTANCE: {range_dist} YARDS"
+                    msg_timer = 180
+                    range_reset_timer = 180
+                elif abs(ball.x - closest_x) > 120 or ball.y < -50 or ball.y > hole_pos[1] + 50:
                     ball.strokes += 2
                     ball.x, ball.y = ball.prev_x, ball.prev_y
                     msg_text = "OUT OF BOUNDS! +2 STROKES"
@@ -1612,7 +1809,7 @@ def main():
                 sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
                 
                 if is_on_green(sim_x, sim_y, green_center, green_shape):
-                    sx, sy = get_slope(sim_x, sim_y, slope_waves, pin_positions)
+                    sx, sy = get_slope(sim_x, sim_y, slope_waves, flat_zones)
                     ball.putt_vx += sx * 2.8
                     ball.putt_vy += sy * 2.8
                     ball.putt_vx *= 0.97
@@ -1621,30 +1818,57 @@ def main():
                         ball.putt_vx *= 0.5  # Strong static friction to prevent endless rolling
                         ball.putt_vy *= 0.5
                 else:
-                    in_water = any(math.hypot(sim_x - haz_x, sim_y - haz_y) < haz_r for haz_x, haz_y, haz_r in water_hazards)
-                    if in_water:
-                        for _ in range(40):
-                            particles.append({
-                                'x': sim_x + random.uniform(-0.2, 0.2), 'y': sim_y + random.uniform(-0.2, 0.2), 'z': 0,
-                                'vx': random.uniform(-0.5, 0.5), 'vy': random.uniform(-0.5, 0.5), 'vz': random.uniform(1.0, 4.0),
-                                'life': random.randint(20, 40),
-                                'color': (200, 220, 255)
-                            })
-                        ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
-                        ball.is_moving = False
-                        ball.strokes += 1
-                        ball.x, ball.y = ball.prev_x, ball.prev_y
+                    if selected_course.name == "Putting Green":
+                        ball.putt_vx = ball.putt_vy = 0
+                        ball.x = hole_pos[0] + random.uniform(-18, 18)
+                        ball.y = hole_pos[1] + random.uniform(-18, 18)
+                        ball.lie = 100
                         ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
                         ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
-                        msg_text = "WATER HAZARD! +1 STROKE"
-                        msg_timer = 180
+                        ball.is_moving = False
+                        ball.is_dragging = False
+                        ball.chipping = False
                     else:
-                        in_bunker = any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
-                        if in_bunker:
-                            ball.putt_vx *= 0.45; ball.putt_vy *= 0.45
+                        in_water = any(math.hypot(sim_x - haz_x, sim_y - haz_y) < haz_r for haz_x, haz_y, haz_r in water_hazards)
+                        if in_water:
+                            for _ in range(40):
+                                particles.append({
+                                    'x': sim_x + random.uniform(-0.2, 0.2), 'y': sim_y + random.uniform(-0.2, 0.2), 'z': 0,
+                                    'vx': random.uniform(-0.5, 0.5), 'vy': random.uniform(-0.5, 0.5), 'vz': random.uniform(1.0, 4.0),
+                                    'life': random.randint(20, 40),
+                                    'color': (200, 220, 255)
+                                })
+                            ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                            ball.is_moving = False
+                            if selected_course.name == "Chipping Green":
+                                shag_bag_count -= 1
+                                msg_text = "WATER HAZARD!"
+                                msg_timer = 90
+                                if shag_bag_count > 0:
+                                    ball.x, ball.y = shag_bag_pos
+                                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                                    ball.strokes = 0
+                                    in_bunker = any(math.hypot(ball.x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
+                                    ball.lie = random.randint(15, 85) if in_bunker else random.randint(30, 90)
+                                    ball.chipping = True
+                                else:
+                                    state = "PLACE_BAG"
+                                    ball.strokes = 0
+                            else:
+                                ball.strokes += 1
+                                ball.x, ball.y = ball.prev_x, ball.prev_y
+                                ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                                ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                                msg_text = "WATER HAZARD! +1 STROKE"
+                                msg_timer = 180
                         else:
-                            ball.putt_vx *= 0.7 # Fringe/Rough friction
-                            ball.putt_vy *= 0.7
+                            in_bunker = any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
+                            if in_bunker:
+                                ball.putt_vx *= 0.45; ball.putt_vy *= 0.45
+                            else:
+                                ball.putt_vx *= 0.7 # Fringe/Rough friction
+                                ball.putt_vy *= 0.7
             
             is_moving_2d = abs(ball.putt_vx) >= 0.06 or abs(ball.putt_vy) >= 0.06 or ball.putt_z > 0
             
@@ -1670,7 +1894,7 @@ def main():
                         sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
                         sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
                         if is_on_green(sim_x, sim_y, green_center, green_shape):
-                            sx, sy = get_slope(sim_x, sim_y, slope_waves, pin_positions)
+                            sx, sy = get_slope(sim_x, sim_y, slope_waves, flat_zones)
                             ball.putt_vx += sx * 2.8; ball.putt_vy += sy * 2.8
                             ball.putt_vx *= 0.97; ball.putt_vy *= 0.97
                             if math.hypot(ball.putt_vx, ball.putt_vy) < 0.7 and math.hypot(sx, sy) < 0.02:
@@ -1687,81 +1911,176 @@ def main():
                                 ball.putt_vx *= 0.45; ball.putt_vy *= 0.45
                             else:
                                 ball.putt_vx *= 0.7; ball.putt_vy *= 0.7
-                state = "3D"
-                ball.is_moving = False
-                ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
-                ball.z = 0
-                
-                if hit_water_fast:
-                    ball.strokes += 1
-                    msg_text = "WATER HAZARD! +1 STROKE"
-                    msg_timer = 180
-                    ball.x, ball.y = ball.prev_x, ball.prev_y
-                else:
-                    ball.x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
-                    ball.y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
-                closest_x = 0; closest_w = 30; min_dist = 9999
-                for y, x, w, *_ in fairway_nodes:
-                    if abs(y - ball.y) < min_dist:
-                        min_dist = abs(y - ball.y)
-                        closest_x = x; closest_w = w
-                    if abs(ball.x - closest_x) > 120 or ball.y < -50 or ball.y > hole_pos[1] + 150:
-                        ball.x, ball.y = ball.prev_x, ball.prev_y
-                        msg_text = "OUT OF BOUNDS! +2 STROKES"
-                        msg_timer = 180
-                        ball.strokes += 2
-                    else:
+                if selected_course.name == "Chipping Green":
+                    shag_bag_count -= 1
+                    msg_text = "WATER HAZARD!" if hit_water_fast else "OUT OF BOUNDS!"
+                    msg_timer = 90
+                    ball.is_moving = False
+                    ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                    ball.z = 0
+                    if shag_bag_count > 0:
+                        ball.x, ball.y = shag_bag_pos
+                        ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                        ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                        ball.strokes = 0
                         in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
-                        if in_bunker:
-                            ball.lie = random.randint(15, 85)
-                        elif abs(ball.x - closest_x) <= closest_w:
-                            ball.lie = 100
+                        ball.lie = random.randint(15, 85) if in_bunker else random.randint(30, 90)
+                        ball.chipping = True
+                    else:
+                        state = "PLACE_BAG"
+                        ball.strokes = 0
+                    is_moving_2d = False
+                    was_moving_2d = False
+                elif selected_course.name == "Putting Green":
+                    msg_text = "OFF THE GREEN! +1 STROKE"
+                    msg_timer = 90
+                    ball.is_moving = False
+                    ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                    ball.z = 0
+                    ball.strokes += 1
+                    ball.x, ball.y = ball.prev_x, ball.prev_y
+                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                    ball.chipping = False
+                    is_moving_2d = False
+                    was_moving_2d = False
+                else:
+                    state = "3D"
+                    ball.is_moving = False
+                    ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                    ball.z = 0
+                    
+                    if hit_water_fast:
+                        ball.strokes += 1
+                        msg_text = "WATER HAZARD! +1 STROKE"
+                        msg_timer = 180
+                        ball.x, ball.y = ball.prev_x, ball.prev_y
+                    else:
+                        ball.x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
+                        ball.y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
+                    closest_x = 0; closest_w = 30; min_dist = 9999
+                    for y, x, w, *_ in fairway_nodes:
+                        if abs(y - ball.y) < min_dist:
+                            min_dist = abs(y - ball.y)
+                            closest_x = x; closest_w = w
+                        if abs(ball.x - closest_x) > 120 or ball.y < -50 or ball.y > hole_pos[1] + 150:
+                            ball.x, ball.y = ball.prev_x, ball.prev_y
+                            msg_text = "OUT OF BOUNDS! +2 STROKES"
+                            msg_timer = 180
+                            ball.strokes += 2
                         else:
-                            ball.lie = random.randint(30, 100)
-                ball.chipping = False
-                aim_angle = math.degrees(math.atan2(hole_pos[0] - ball.x, hole_pos[1] - ball.y))
-                cam_angle = aim_angle
-                is_moving_2d = False
-                was_moving_2d = False
+                            in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                            if in_bunker:
+                                ball.lie = random.randint(15, 85)
+                            elif abs(ball.x - closest_x) <= closest_w:
+                                ball.lie = 100
+                            else:
+                                ball.lie = random.randint(30, 100)
+                    ball.chipping = False
+                    aim_angle = math.degrees(math.atan2(hole_pos[0] - ball.x, hole_pos[1] - ball.y))
+                    cam_angle = aim_angle
+                    is_moving_2d = False
+                    was_moving_2d = False
 
             if not is_moving_2d and was_moving_2d:
                 ball.putt_vx = ball.putt_vy = ball.putt_z = 0
                 sim_x = hole_pos[0] + (ball.putt_x - curr_w//2) / PPU
                 sim_y = hole_pos[1] - (ball.putt_y - curr_h//2) / PPU
-                if is_on_green(sim_x, sim_y, green_center, green_shape):
-                    ball.lie = 100
-                    ball.chipping = False
-                else:
-                    in_bunker = any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
-                    if in_bunker:
-                        ball.lie = random.randint(15, 85)
+                if selected_course.name == "Chipping Green":
+                    practice_balls.append((sim_x, sim_y, 0))
+                    shag_bag_count -= 1
+                    if shag_bag_count > 0:
+                        ball.x, ball.y = shag_bag_pos
+                        ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                        ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                        ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                        ball.is_moving = False
+                        ball.is_dragging = False
+                        ball.strokes = 0
+                        in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                        ball.lie = random.randint(15, 85) if in_bunker else random.randint(30, 90)
                         ball.chipping = True
                     else:
-                        ball.lie = random.randint(30, 90)
-                        ball.chipping = True if ball.lie < 70 else False
+                        state = "PLACE_BAG"
+                        ball.is_moving = False
+                        ball.is_dragging = False
+                        ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                        ball.strokes = 0
+                else:
+                    if is_on_green(sim_x, sim_y, green_center, green_shape):
+                        ball.lie = 100
+                        ball.chipping = False
+                    else:
+                        in_bunker = any(math.hypot(sim_x - bx, sim_y - by) < br for bx, by, br, _ in bunkers)
+                        if in_bunker:
+                            ball.lie = random.randint(15, 85)
+                            ball.chipping = True
+                        else:
+                            ball.lie = random.randint(30, 90)
+                            ball.chipping = True if ball.lie < 70 else False
             elif not is_moving_2d:
                 ball.putt_vx = ball.putt_vy = ball.putt_z = 0
                 
             # Physics around the hole
             if ball.putt_z == 0:
-                hole_cx, hole_cy = curr_w // 2, curr_h // 2
-                dist_to_hole = math.hypot(ball.putt_x - hole_cx, ball.putt_y - hole_cy)
                 speed = math.hypot(ball.putt_vx, ball.putt_vy)
+                pins_to_check = pin_positions if selected_course.name in ["Putting Green", "Chipping Green"] else [hole_pos]
                 
-                if 0 < dist_to_hole < 24:
-                    # Gentle pull only when right on the lip
-                    pull_strength = (24 - dist_to_hole) * 0.08
-                    ball.putt_vx += ((hole_cx - ball.putt_x) / dist_to_hole) * pull_strength
-                    ball.putt_vy += ((hole_cy - ball.putt_y) / dist_to_hole) * pull_strength
+                for p_pos in pins_to_check:
+                    hx = curr_w // 2 + int((p_pos[0] - hole_pos[0]) * PPU)
+                    hy = curr_h // 2 - int((p_pos[1] - hole_pos[1]) * PPU)
+                    dist_to_hole = math.hypot(ball.putt_x - hx, ball.putt_y - hy)
                     
-                    if dist_to_hole < 12 and speed < 14.0:
-                        state = "HOLE"
-                        scores[hole_idx] = ball.strokes
-                        show_scorecard = True
-                    elif dist_to_hole < 17 and speed >= 14.0:
-                        # Lip out penalty - lose speed from hitting the edge
-                        ball.putt_vx *= 0.85
-                        ball.putt_vy *= 0.85
+                    if 0 < dist_to_hole < 24:
+                        # Gentle pull only when right on the lip
+                        pull_strength = (24 - dist_to_hole) * 0.08
+                        ball.putt_vx += ((hx - ball.putt_x) / dist_to_hole) * pull_strength
+                        ball.putt_vy += ((hy - ball.putt_y) / dist_to_hole) * pull_strength
+                        
+                        if dist_to_hole < 12 and speed < 14.0:
+                            if selected_course.name == "Chipping Green":
+                                practice_balls.append((p_pos[0], p_pos[1], 0))
+                                shag_bag_count -= 1
+                                if shag_bag_count > 0:
+                                    ball.x, ball.y = shag_bag_pos
+                                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                                    ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                                    ball.is_moving = False
+                                    ball.is_dragging = False
+                                    ball.strokes = 0
+                                    in_bunker = any(math.hypot(ball.x - bx, ball.y - by) < br for bx, by, br, _ in bunkers)
+                                    ball.lie = random.randint(15, 85) if in_bunker else random.randint(30, 90)
+                                    ball.chipping = True
+                                else:
+                                    state = "PLACE_BAG"
+                                    ball.is_moving = False
+                                    ball.is_dragging = False
+                                    ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                                    ball.strokes = 0
+                                break
+                            elif selected_course.name == "Putting Green":
+                                ball.x = hole_pos[0] + random.uniform(-18, 18)
+                                ball.y = hole_pos[1] + random.uniform(-18, 18)
+                                ball.lie = 100
+                                ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                                ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+                                ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                                ball.is_moving = False
+                                ball.is_dragging = False
+                                ball.strokes = 0
+                                ball.chipping = False
+                                break
+                            else:
+                                state = "HOLE"
+                                scores[hole_idx] = ball.strokes
+                                show_scorecard = True
+                                ball.x, ball.y = p_pos[0], p_pos[1]
+                                break
+                        elif dist_to_hole < 17 and speed >= 14.0:
+                            # Lip out penalty - lose speed from hitting the edge
+                            ball.putt_vx *= 0.85
+                            ball.putt_vy *= 0.85
 
         # --- Rendering ---
         if state == "3D":
@@ -1851,21 +2170,22 @@ def main():
                     if top:
                         pygame.draw.line(screen, WHITE, base[:2], top[:2], max(1, int(2.5*base[2])))
 
-            for i in range(len(fairway_nodes)-1):
-                node1 = fairway_nodes[i]
-                node2 = fairway_nodes[i+1]
-                y1, x1, w1, z1 = node1[:4]
-                cs1 = node1[4] if len(node1) > 4 else 0.0
-                y2, x2, w2, z2 = node2[:4]
-                cs2 = node2[4] if len(node2) > 4 else 0.0
-                
-                p1l = project(x1-w1, y1, z1 - cs1*w1, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p1r = project(x1+w1, y1, z1 + cs1*w1, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p2l = project(x2-w2, y2, z2 - cs2*w2, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                p2r = project(x2+w2, y2, z2 + cs2*w2, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                if p1l and p1r and p2l and p2r:
-                    if p1l[3] > -14 or p2l[3] > -14 or p1r[3] > -14 or p2r[3] > -14:
-                        pygame.draw.polygon(screen, FAIRWAY, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
+            if selected_course.name != "Driving Range":
+                for i in range(len(fairway_nodes)-1):
+                    node1 = fairway_nodes[i]
+                    node2 = fairway_nodes[i+1]
+                    y1, x1, w1, z1 = node1[:4]
+                    cs1 = node1[4] if len(node1) > 4 else 0.0
+                    y2, x2, w2, z2 = node2[:4]
+                    cs2 = node2[4] if len(node2) > 4 else 0.0
+                    
+                    p1l = project(x1-w1, y1, z1 - cs1*w1, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    p1r = project(x1+w1, y1, z1 + cs1*w1, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    p2l = project(x2-w2, y2, z2 - cs2*w2, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    p2r = project(x2+w2, y2, z2 + cs2*w2, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    if p1l and p1r and p2l and p2r:
+                        if p1l[3] > -14 or p2l[3] > -14 or p1r[3] > -14 or p2r[3] > -14:
+                            pygame.draw.polygon(screen, FAIRWAY, [p1l[:2], p1r[:2], p2r[:2], p2l[:2]])
 
             # --- Draw Bunkers ---
             for bx, by, br, bz in bunkers:
@@ -1892,16 +2212,73 @@ def main():
                     pygame.draw.polygon(screen, (200, 200, 255), [pt[:2] for pt in w_pts], max(1, int(w_pts[0][2])))
 
             # --- Tee Box ---
-            tb_z1 = get_elevation(0, -10, fairway_nodes, green_z)
-            tb_z2 = get_elevation(0, 8, fairway_nodes, green_z)
-            tb_p1l = project(-12, -10, tb_z1, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            tb_p1r = project(12, -10, tb_z1, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            tb_p2l = project(-12, 8, tb_z2, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            tb_p2r = project(12, 8, tb_z2, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            if tb_p1l and tb_p1r and tb_p2l and tb_p2r:
-                if tb_p1l[3] > -14 or tb_p2l[3] > -14 or tb_p1r[3] > -14 or tb_p2r[3] > -14:
-                    pygame.draw.polygon(screen, GREEN_COLOR, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]])
-                    pygame.draw.polygon(screen, WHITE, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]], 1)
+            if selected_course.name not in ["Putting Green", "Chipping Green"]:
+                tb_z1 = get_elevation(0, -10, fairway_nodes, green_z)
+                tb_z2 = get_elevation(0, 8, fairway_nodes, green_z)
+                tb_p1l = project(-12, -10, tb_z1, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                tb_p1r = project(12, -10, tb_z1, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                tb_p2l = project(-12, 8, tb_z2, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                tb_p2r = project(12, 8, tb_z2, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if tb_p1l and tb_p1r and tb_p2l and tb_p2r:
+                    if tb_p1l[3] > -14 or tb_p2l[3] > -14 or tb_p1r[3] > -14 or tb_p2r[3] > -14:
+                        pygame.draw.polygon(screen, GREEN_COLOR, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]])
+                        pygame.draw.polygon(screen, WHITE, [tb_p1l[:2], tb_p1r[:2], tb_p2r[:2], tb_p2l[:2]], 1)
+                    
+            if selected_course.name == "Driving Range":
+                for px, py in pin_positions:
+                    pz = get_elevation(px, py, fairway_nodes, green_z)
+                    is_basket = (py in [50, 75, 100])
+                    
+                    if is_basket:
+                        basket_color = (255, 165, 0)
+                        b_pts_top = []
+                        b_pts_bot = []
+                        for a in range(0, 360, 15):
+                            rad = math.radians(a)
+                            bx, by_c = px + math.cos(rad)*1.1, py + math.sin(rad)*1.1
+                            pt = project(bx, by_c, pz+1.0, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                            pb = project(bx, by_c, pz, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                            if pt and pb and pt[3] > -14:
+                                b_pts_top.append(pt)
+                                b_pts_bot.append(pb)
+                                
+                        if b_pts_top and b_pts_bot:
+                            segments = []
+                            for i in range(len(b_pts_top)):
+                                p1_t = b_pts_top[i]
+                                p2_t = b_pts_top[(i+1)%len(b_pts_top)]
+                                p1_b = b_pts_bot[i]
+                                p2_b = b_pts_bot[(i+1)%len(b_pts_bot)]
+                                dist = (p1_t[3] + p2_t[3]) / 2.0
+                                segments.append((dist, [p1_t[:2], p2_t[:2], p2_b[:2], p1_b[:2]]))
+                                
+                            segments.sort(key=lambda x: x[0], reverse=True)
+                            for dist, poly in segments:
+                                pygame.draw.polygon(screen, basket_color, poly)
+                                pygame.draw.polygon(screen, (150, 80, 0), poly, 1)
+                                
+                            if len(b_pts_top) > 2:
+                                pygame.draw.polygon(screen, (40, 40, 40), [p[:2] for p in b_pts_top])
+                    else:
+                        for radius, c in [(15, WHITE), (10, RED), (5, YELLOW)]:
+                            pts = []
+                            for a in range(0, 360, 20):
+                                rad = math.radians(a)
+                                pt = project(px + math.cos(rad)*radius, py + math.sin(rad)*radius, pz, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                                if pt and pt[3] > -14: pts.append(pt[:2])
+                            if len(pts) > 2: pygame.draw.polygon(screen, c, pts)
+                            
+                    # Draw Yardage Sign
+                    sign_pt = project(px - (3 if is_basket else 18), py, pz+1.5, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    sign_base = project(px - (3 if is_basket else 18), py, pz, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                    if sign_pt and sign_base and sign_pt[3] > -14:
+                        pygame.draw.line(screen, WHITE, sign_base[:2], sign_pt[:2], max(1, int(2.0*sign_base[2])))
+                        yd_surf = font_small.render(f"{int(py)}", True, (0, 0, 0))
+                        bg_rect = yd_surf.get_rect(center=(sign_pt[0], sign_pt[1]))
+                        bg_rect.inflate_ip(8, 4)
+                        pygame.draw.rect(screen, WHITE, bg_rect)
+                        pygame.draw.rect(screen, (0,0,0), bg_rect, 1)
+                        screen.blit(yd_surf, yd_surf.get_rect(center=(sign_pt[0], sign_pt[1])))
                 
             tm_z = get_elevation(0, 0, fairway_nodes, green_z)
             tm1 = project(-4, 0, tm_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
@@ -1928,10 +2305,13 @@ def main():
             if len(green1_pts) > 2 and any(pt[3] > -14 for pt in green1_pts): pygame.draw.polygon(screen, GREEN_COLOR, [pt[:2] for pt in green1_pts])
             if len(green2_pts) > 2 and any(pt[3] > -14 for pt in green2_pts): pygame.draw.polygon(screen, GREEN_COLOR, [pt[:2] for pt in green2_pts])
 
-            f = project(hole_pos[0], hole_pos[1], green_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
-            if f and f[3] > -14:
-                pygame.draw.line(screen, WHITE, (f[0], f[1]), (f[0], f[1]-max(1, int(12*f[2]))), 2)
-                pygame.draw.rect(screen, RED, (f[0], f[1]-max(1, int(12*f[2])), max(1, int(4*f[2])), max(1, int(3*f[2]))))
+            pins_to_draw = pin_positions if selected_course.name in ["Putting Green", "Chipping Green", "Driving Range"] else [hole_pos]
+            for px, py in pins_to_draw:
+                pz = green_z if selected_course.name != "Driving Range" else get_elevation(px, py, fairway_nodes, green_z)
+                f = project(px, py, pz, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if f and f[3] > -14:
+                    pygame.draw.line(screen, WHITE, (f[0], f[1]), (f[0], f[1]-max(1, int(12*f[2]))), 2)
+                    pygame.draw.rect(screen, RED, (f[0], f[1]-max(1, int(12*f[2])), max(1, int(4*f[2])), max(1, int(3*f[2]))))
             
             # --- Draw Trees ---
             trees_to_draw = []
@@ -1946,11 +2326,27 @@ def main():
             trees_to_draw.sort(key=lambda x: x[0], reverse=True) # Farthest first
             
             for dist, tx, ty, tz, th, tw, t_color, t_type, t_extra in trees_to_draw:
+                sway_dx, sway_dy = 0, 0
+                if wind_mag > 1.0 and t_type == "tree":
+                    # Sway amplitude based on wind speed and tree height
+                    sway_amplitude = (wind_mag / 20.0) * (th / 50.0) * 1.5 
+                    
+                    # Unique sway for each tree using its position as a seed
+                    sway_phase = (tx * 0.1) + (ty * 0.05)
+                    sway_factor = math.sin(current_time * 1.2 + sway_phase) * sway_amplitude
+                    
+                    # Sway perpendicular to wind direction
+                    wind_rad = math.atan2(wy, wx)
+                    sway_dir_rad = wind_rad + math.pi / 2
+                    
+                    sway_dx = math.cos(sway_dir_rad) * sway_factor
+                    sway_dy = math.sin(sway_dir_rad) * sway_factor
+
                 base = project(tx, ty, tz, cam_x, cam_y, cam_angle, curr_w, curr_h)
                 if base and base[3] > -14:
                     if t_type == "tree":
-                        top = project(tx, ty, tz + th, cam_x, cam_y, cam_angle, curr_w, curr_h)
-                        l_bot = project(tx, ty, tz + th * 0.3, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        top = project(tx + sway_dx, ty + sway_dy, tz + th, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        l_bot = project(tx + sway_dx * 0.4, ty + sway_dy * 0.4, tz + th * 0.3, cam_x, cam_y, cam_angle, curr_w, curr_h)
                         if top and l_bot:
                             trunk_w = max(1, int(tw * 0.3 * base[2]))
                             pygame.draw.line(screen, BROWN, base[:2], l_bot[:2], trunk_w)
@@ -1979,6 +2375,10 @@ def main():
                             pygame.draw.circle(screen, t_color, base[:2], r1)
                             c_top = (min(255, t_color[0]+30), min(255, t_color[1]+30), min(255, t_color[2]+30))
                             pygame.draw.circle(screen, c_top, top[:2], max(2, int(tw * 1.0 * top[2])))
+                    elif t_type == "pole":
+                        top = project(tx, ty, tz + th, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        if top:
+                            pygame.draw.line(screen, t_color, base[:2], top[:2], max(1, int(tw * 2.0 * base[2])))
                     elif t_type == "bridge":
                         rad = math.radians(t_extra if t_extra else 0)
                         dx = math.cos(rad) * tw / 2
@@ -2054,8 +2454,21 @@ def main():
                         club_rect = pygame.Rect(club_head[0]-cw, club_head[1]-ch, cw*2, ch*2)
                         pygame.draw.ellipse(screen, (100, 100, 100), club_rect)
                         
-            # --- Draw Peers in 3D ---
+            # --- Draw Practice Balls (3D) ---
+            for px, py, pz in practice_balls:
+                p_ground_z = get_elevation(px, py, fairway_nodes, green_z)
+                pb = project(px, py, pz + p_ground_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                if pb and pb[3] > -14: pygame.draw.circle(screen, WHITE, (pb[0], pb[1]), max(1, int(0.12*pb[2])))
+                
+            # --- Draw Peers and their Practice Balls in 3D ---
             for p_id, p_state in active_peers:
+                if p_state.get('practice_balls'):
+                    for px, py, pz in p_state['practice_balls']:
+                        p_ground_z = get_elevation(px, py, fairway_nodes, green_z)
+                        pb = project(px, py, pz + p_ground_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
+                        if pb and pb[3] > -14: pygame.draw.circle(screen, (200, 200, 200), (pb[0], pb[1]), max(1, int(0.12*pb[2])))
+                        
+            # --- Draw Peers in 3D ---
                 if p_state['hole'] == hole_idx and p_state['state'] == "3D":
                     p_ground_z = get_elevation(p_state['x'], p_state['y'], fairway_nodes, green_z)
                     p_b = project(p_state['x'], p_state['y'], p_state['z'] + p_ground_z, cam_x, cam_y, cam_angle, curr_w, curr_h)
@@ -2142,28 +2555,34 @@ def main():
                     pygame.draw.circle(screen, YELLOW, (t_proj[0], t_proj[1]), max(2, int(15*t_proj[2])), 1)
 
             if is_stat_3d:
-                controls_txt = "ARROWS: Aim/Loft  |  A/D: Face Angle  |  W/S: Change Club  |  SPACE: Swing"
+                if selected_course.name == "Driving Range" and ball.strokes > 0:
+                    controls_txt = "SPACE: Tee Up New Ball  |  R: Clear Balls"
+                else:
+                    controls_txt = "ARROWS: Aim/Loft  |  A/D: Face Angle  |  W/S: Change Club  |  SPACE: Swing  |  R: Clear Balls"
                 screen.blit(font_small.render(controls_txt, True, WHITE), (20, curr_h - 30))
 
             if not my_turn and state == "3D" and ball.strokes == 0:
                 wait_txt = font_med.render(f"Waiting for {waiting_on} to Tee Off...", True, YELLOW)
                 screen.blit(wait_txt, (curr_w//2 - wait_txt.get_width()//2, 100))
 
-            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats, active_peers, network.player_id)
+            draw_hud(screen, curr_w, curr_h, ball, hole_pos, club_idx, power, wx, wy, is_swinging, trajectory_offset, face_angle, cam_angle, hole_idx, par, show_adv_stats, active_peers, network.player_id, networking_enabled, weather)
 
-        elif state == "GREEN":
+        elif state in ["GREEN", "PLACE_BAG"]:
             hole_radius = max(6, int(curr_h * 0.012))
             ball_radius = max(3, int(curr_h * 0.006))
-            
-            screen.fill(selected_course.rough_color)
-            g1_w, g1_h = green_shape[0]
-            g2_w, g2_h = green_shape[1]
-            ox, oy = green_shape[2]
-            
-            green_cx = curr_w//2 + int((green_center[0] - hole_pos[0]) * PPU)
-            green_cy = curr_h//2 - int((green_center[1] - hole_pos[1]) * PPU)
-            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(green_cx - int(g1_w*PPU), green_cy - int(g1_h*PPU), int(g1_w*PPU*2), int(g1_h*PPU*2)))
-            pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(green_cx + int(ox*PPU) - int(g2_w*PPU), green_cy - int(oy*PPU) - int(g2_h*PPU), int(g2_w*PPU*2), int(g2_h*PPU*2)))
+
+            if selected_course.name == "Putting Green":
+                screen.fill(GREEN_COLOR)
+            else:
+                screen.fill(selected_course.rough_color)
+                g1_w, g1_h = green_shape[0]
+                g2_w, g2_h = green_shape[1]
+                ox, oy = green_shape[2]
+                
+                green_cx = curr_w//2 + int((green_center[0] - hole_pos[0]) * PPU)
+                green_cy = curr_h//2 - int((green_center[1] - hole_pos[1]) * PPU)
+                pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(green_cx - int(g1_w*PPU), green_cy - int(g1_h*PPU), int(g1_w*PPU*2), int(g1_h*PPU*2)))
+                pygame.draw.ellipse(screen, GREEN_COLOR, pygame.Rect(green_cx + int(ox*PPU) - int(g2_w*PPU), green_cy - int(oy*PPU) - int(g2_h*PPU), int(g2_w*PPU*2), int(g2_h*PPU*2)))
             
             # --- Draw Bunkers in 2D ---
             for bx, by, br, bz in bunkers:
@@ -2202,31 +2621,60 @@ def main():
                     sim_x = hole_pos[0] + (gx - curr_w//2) / PPU
                     sim_y = hole_pos[1] - (gy - curr_h//2) / PPU
                     if is_on_green(sim_x, sim_y, green_center, green_shape):
-                        sx, sy = get_slope(sim_x, sim_y, slope_waves, pin_positions)
+                        sx, sy = get_slope(sim_x, sim_y, slope_waves, flat_zones)
                         draw_sx = sx * 4500
                         draw_sy = sy * 4500
                         if abs(draw_sx) > 1 or abs(draw_sy) > 1:
                             pygame.draw.line(screen, (35, 140, 35), (gx, gy), (gx + draw_sx, gy + draw_sy), 2)
                             pygame.draw.circle(screen, (200, 255, 200), (int(gx + draw_sx), int(gy + draw_sy)), 2)
 
-            hole_screen_pos = (curr_w//2, curr_h//2)
-            pygame.draw.circle(screen, HOLE_COLOR, hole_screen_pos, hole_radius)
+            pins_to_draw = pin_positions if selected_course.name in ["Putting Green", "Chipping Green"] else [hole_pos]
+            for p_pos in pins_to_draw:
+                hx = curr_w // 2 + int((p_pos[0] - hole_pos[0]) * PPU)
+                hy = curr_h // 2 - int((p_pos[1] - hole_pos[1]) * PPU)
+                pygame.draw.circle(screen, HOLE_COLOR, (hx, hy), hole_radius)
             
             # --- FIXED: Putter Line ---
             if ball.is_dragging:
                 mods = pygame.key.get_mods()
-                power_boost = 3.0 if mods & pygame.KMOD_SHIFT else 1.0
-                line_color = YELLOW if power_boost > 1.0 else WHITE
+                if mods & pygame.KMOD_SHIFT:
+                    power_boost = 3.0
+                    line_color = YELLOW
+                elif mods & pygame.KMOD_CTRL:
+                    power_boost = 0.3
+                    line_color = (100, 200, 255)
+                else:
+                    power_boost = 1.0
+                    line_color = WHITE
                 
-                # Line pulling back from the ball (Slingshot to mouse)
-                pygame.draw.line(screen, line_color, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), mouse_pos, 2)
+                if ball.ds:
+                    pull_x = ball.putt_x + (mouse_pos[0] - ball.ds[0]) * power_boost
+                    pull_y = (ball.putt_y - ball.putt_z) + (mouse_pos[1] - ball.ds[1]) * power_boost
+                    pygame.draw.line(screen, line_color, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), (int(pull_x), int(pull_y)), 2)
+                    
+                    drag_dx = (ball.ds[0] - mouse_pos[0]) / PPU
+                    drag_dy = (ball.ds[1] - mouse_pos[1]) / PPU
+                    power_val = int(math.hypot(drag_dx, drag_dy) * power_boost * 10)
+                    screen.blit(font_small.render(f"PWR: {power_val}", True, line_color), (mouse_pos[0] + 15, mouse_pos[1] - 15))
 
             if ball.putt_z > 0:
                 pygame.draw.circle(screen, (0, 0, 0), (int(ball.putt_x), int(ball.putt_y)), ball_radius) # shadow
             pygame.draw.circle(screen, WHITE, (int(ball.putt_x), int(ball.putt_y - ball.putt_z)), ball_radius)
             
+            # --- Draw Practice Balls (2D) ---
+            for px, py, pz in practice_balls:
+                screen_px = curr_w//2 + int((px - hole_pos[0]) * PPU)
+                screen_py = curr_h//2 - int((py - hole_pos[1]) * PPU)
+                pygame.draw.circle(screen, WHITE, (screen_px, screen_py), ball_radius)
+                
             # --- Draw Peers in 2D ---
             for p_id, p_state in active_peers:
+                if p_state.get('practice_balls'):
+                    for px, py, pz in p_state['practice_balls']:
+                        screen_px = curr_w//2 + int((px - hole_pos[0]) * PPU)
+                        screen_py = curr_h//2 - int((py - hole_pos[1]) * PPU)
+                        pygame.draw.circle(screen, (200, 200, 200), (screen_px, screen_py), ball_radius)
+                        
                 if p_state['hole'] == hole_idx and p_state['state'] == "GREEN":
                     px, py, pz = int(p_state['putt_x']), int(p_state['putt_y']), p_state['putt_z']
                     if pz > 0: pygame.draw.circle(screen, (0, 0, 0), (px, py), ball_radius)
@@ -2241,11 +2689,18 @@ def main():
                 if pz_screen > 0:
                     pygame.draw.circle(screen, p['color'], (screen_px, screen_py - pz_screen), max(1, int(p['life']/10)))
                     
-            mode_str = f"CHIP ({CLUBS[club_idx][0]})" if ball.chipping else "PUTT"
-            lie_str = f"Lie: {ball.lie}%"
-            color = WHITE if ball.lie >= 90 else YELLOW
-            txt = f"{mode_str} - {lie_str} - Drag to aim. SHIFT: Power. SPACE: mode. W/S: club."
-            screen.blit(font_med.render(txt, True, color), (40, 40))
+            if state == "PLACE_BAG":
+                txt_surf = font_large.render("CLICK ANYWHERE TO DROP SHAG BAG (20 BALLS)", True, YELLOW)
+                screen.blit(txt_surf, (curr_w//2 - txt_surf.get_width()//2, 40))
+            else:
+                mode_str = "CHIP" if ball.chipping else "PUTT"
+                club_str = f" ({CLUBS[club_idx][0]})" if ball.chipping else ""
+                lie_str = f"Lie: {ball.lie}%"
+                color = WHITE if ball.lie >= 90 else YELLOW
+                txt = f"{mode_str}{club_str} - {lie_str} - Drag aim. SHIFT/CTRL: Power/Fine. SPACE: mode. W/S: club. R: clear."
+                if selected_course.name == "Chipping Green":
+                    txt = f"SHAG BAG: {shag_bag_count}/20 BALLS  |  B: move bag  |  " + txt
+                screen.blit(font_med.render(txt, True, color), (40, 40))
 
         elif state == "HOLE":
             screen.fill((0, 0, 0))
@@ -2280,9 +2735,11 @@ def main():
             hole_data = selected_course.holes[hole_idx]
             green_center = hole_data["hole_pos"]
             pin_positions = hole_data.get("pin_positions", [green_center])
+            flat_zones = hole_data.get("flat_zones", pin_positions)
             
             wind_rng = random.Random(312 + hole_idx)
             wx, wy = wind_rng.uniform(-difficulty, difficulty), wind_rng.uniform(-difficulty, difficulty)
+            weather = wind_rng.choice(["Clear", "Clear", "Overcast", "Rain"])
             pin_idx = wind_rng.randint(0, len(pin_positions) - 1)
             hole_pos = pin_positions[pin_idx]
             
@@ -2298,12 +2755,29 @@ def main():
             cam_x, cam_y = 0, -20
             aim_angle = math.degrees(math.atan2(hole_pos[0], hole_pos[1]))
             cam_angle = aim_angle
-            trajectory_offset = 0.0
-            face_angle = 0.0
-            state = "3D"
+            if selected_course.name in ["Putting Green", "Chipping Green"]:
+                state = "PLACE_BAG" if selected_course.name == "Chipping Green" else "GREEN"
+                if state == "GREEN":
+                    ball.x = hole_pos[0] + random.uniform(-18, 18)
+                    ball.y = hole_pos[1] + random.uniform(-9, 9)
+                    ball.lie = 100
+                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
+            else:
+                state = "3D"
             is_swinging = False; power = 0.0
             jump_hole_dir = 0
             show_scorecard = False
+            range_reset_timer = 0
+
+        # Check for auto-reset on driving range
+        if range_reset_timer > 0:
+            range_reset_timer -= 1
+            if range_reset_timer == 0:
+                practice_balls.append((ball.x, ball.y, ball.z))
+                ball.x, ball.y, ball.z = 0, 0, 0
+                ball.strokes = 0
+                ball.prev_x, ball.prev_y = 0, 0
 
         # Check for unplayable lie action
         if take_unplayable:
@@ -2353,9 +2827,30 @@ def main():
                 msg_timer = 180
                 aim_angle = math.degrees(math.atan2(hole_pos[0] - ball.x, hole_pos[1] - ball.y))
                 cam_angle = aim_angle
-                state = "3D"
-                ball.chipping = False
+                if selected_course.name not in ["Putting Green", "Chipping Green"]:
+                    state = "3D"
+                    ball.chipping = False
+                else:
+                    ball.putt_x = curr_w // 2 + (ball.x - hole_pos[0]) * PPU
+                    ball.putt_y = curr_h // 2 + (hole_pos[1] - ball.y) * PPU
                 ball.putt_vx = ball.putt_vy = ball.putt_z = ball.putt_vz = 0
+                
+        # --- Draw Weather Effects ---
+        rad = math.radians(cam_angle) if state == "3D" else 0
+        local_wx = wx * math.cos(rad) - wy * math.sin(rad)
+        local_wy = wx * math.sin(rad) + wy * math.cos(rad)
+
+        if weather == "Rain" and state in ["3D", "GREEN"]:
+            for _ in range(150):
+                rx = random.randint(-200, curr_w + 200)
+                ry = random.randint(-50, curr_h)
+                if state == "GREEN":
+                    dx = int(wx * 2.5)
+                    dy = int(-wy * 2.5) + random.randint(20, 45)
+                else:
+                    dx = int(local_wx * 2.5)
+                    dy = int(-local_wy * 1.5) + random.randint(20, 45)
+                pygame.draw.line(screen, (170, 180, 190), (rx, ry), (rx + dx, ry + dy), 1)
 
         if msg_timer > 0:
             msg_timer -= 1
@@ -2365,7 +2860,7 @@ def main():
             pygame.draw.rect(screen, HOLE_COLOR, bg_rect, 3, border_radius=8)
             screen.blit(surf, surf.get_rect(center=(curr_w//2, curr_h//2 - 100)))
 
-        draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats)
+        draw_menus(screen, curr_w, active_menu, show_wind_preview, show_adv_stats, networking_enabled)
         
         if show_scorecard:
             group_scores = {network.player_id: scores}
@@ -2383,6 +2878,12 @@ def main():
 
         pygame.display.flip()
         clock.tick(60)
+    return False
+
+def main():
+    while True:
+        if not run_game_session():
+            break
     pygame.quit()
 
 if __name__ == "__main__":
